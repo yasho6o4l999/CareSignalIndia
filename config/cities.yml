@@ -1,0 +1,32 @@
+cities:
+  - city_id: delhi
+    city_name: Delhi
+    latitude: 28.6139
+    longitude: 77.2090
+    timezone: Asia/Kolkata
+    climate_zone: north_inland
+  - city_id: mumbai
+    city_name: Mumbai
+    latitude: 19.0760
+    longitude: 72.8777
+    timezone: Asia/Kolkata
+    climate_zone: west_coastal
+  - city_id: bengaluru
+    city_name: Bengaluru
+    latitude: 12.9716
+    longitude: 77.5946
+    timezone: Asia/Kolkata
+    climate_zone: south_plateau
+  - city_id: chennai
+    city_name: Chennai
+    latitude: 13.0827
+    longitude: 80.2707
+    timezone: Asia/Kolkata
+    climate_zone: south_coastal
+  - city_id: ahmedabad
+    city_name: Ahmedabad
+    latitude: 23.0225
+    longitude: 72.5714
+    timezone: Asia/Kolkata
+    climate_zone: west_inland
+

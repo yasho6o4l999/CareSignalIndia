@@ -1,0 +1,47 @@
+rules:
+  - rule_id: heat_stress
+    metric: apparent_temperature
+    operator: greater_than_or_equal
+    threshold: 40
+    persistence_hours: 3
+    severity: high
+    relevant_conditions: [diabetes, cardiovascular, renal, respiratory]
+    cities: [delhi, mumbai, bengaluru, chennai, ahmedabad]
+    months: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+  - rule_id: cold_stress
+    metric: apparent_temperature
+    operator: less_than_or_equal
+    threshold: 10
+    persistence_hours: 3
+    severity: medium
+    relevant_conditions: [cardiovascular, respiratory]
+    cities: [delhi, ahmedabad]
+    months: [11, 12, 1, 2]
+  - rule_id: heavy_rain
+    metric: precipitation
+    operator: greater_than_or_equal
+    threshold: 20
+    persistence_hours: 1
+    severity: medium
+    relevant_conditions: [diabetes, cardiovascular, renal, respiratory]
+    cities: [delhi, mumbai, bengaluru, chennai, ahmedabad]
+    months: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+  - rule_id: delhi_winter_pm25
+    metric: pm2_5
+    operator: greater_than_or_equal
+    threshold: 60
+    persistence_hours: 12
+    severity: high
+    relevant_conditions: [respiratory, cardiovascular]
+    cities: [delhi]
+    months: [10, 11, 12, 1]
+  - rule_id: particulate_pollution
+    metric: pm2_5
+    operator: greater_than_or_equal
+    threshold: 60
+    persistence_hours: 12
+    severity: high
+    relevant_conditions: [respiratory, cardiovascular]
+    cities: [mumbai, bengaluru, chennai, ahmedabad]
+    months: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+
