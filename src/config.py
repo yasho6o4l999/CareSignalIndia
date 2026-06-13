@@ -206,6 +206,17 @@ class Rule(BaseModel):
                 for band in self.severity_bands
             ]
             _unique(band_keys, "severity_bands")
+            severity_rank = {"low": 1, "medium": 2, "high": 3, "critical": 4}
+            for left in self.severity_bands:
+                for right in self.severity_bands:
+                    right_is_stronger = (
+                        right.minimum_persistence_hours >= left.minimum_persistence_hours
+                        and right.minimum_threshold_ratio >= left.minimum_threshold_ratio
+                    )
+                    if right_is_stronger and severity_rank[right.severity] < severity_rank[left.severity]:
+                        raise ValueError(
+                            "severity must not decrease as persistence and threshold ratio increase"
+                        )
         return self
 
 

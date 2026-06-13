@@ -30,3 +30,28 @@ condition relevance, age, consent, and the configured contact cooldown.
 `repeat_when_severity_increases` is intentionally not enforced in this prototype because there is no
 persisted outreach-action history. In production, that policy should compare the new trigger severity with
 the member's most recent action for the same signal before overriding the cooldown.
+
+## Pre-Deployment Review
+
+Rule conflict review detects impossible absolute ranges and duplicate signals with overlapping city, month,
+and cohort scope. Those findings exit with a failure code suitable for CI. Nested compound signals are
+reported as warnings because they may be intentional but can create duplicate care-team workload.
+
+```bash
+python -m src.config_review conflicts
+python -m src.config_review conflicts --json
+```
+
+Configuration impact analysis compares two complete configuration directories. It reports added, removed,
+and changed rules and cities; city-month evaluation scope; cohort links; severity bands; policy changes; and
+the estimated synthetic-member population in affected cities.
+
+```bash
+cp -R config /tmp/caresignal-config-baseline
+# edit config/
+python -m src.config_review impact --baseline /tmp/caresignal-config-baseline
+python -m src.config_review impact --baseline /tmp/caresignal-config-baseline --json
+```
+
+The impact report is structural and deterministic. A production release process should additionally replay
+the candidate rules against representative historical data to estimate alert volume and care-team workload.

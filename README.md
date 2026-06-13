@@ -82,7 +82,12 @@ The configuration layer is validated independently with:
 
 ```bash
 python -m src.validate_config
+python -m src.config_review conflicts
 ```
+
+Before deploying config changes, `python -m src.config_review impact --baseline <config-directory>`
+quantifies changed rule scope, cohorts, severity bands, policies, and estimated affected members. See
+[`docs/configuration.md`](docs/configuration.md) for the review workflow and CI behavior.
 
 `config/runtime.yml` owns deterministic synthetic-member settings, `config/publication_policy.yml` owns
 source-aware publication gates, `config/outreach_policy.yml` owns contact cooldown, and
