@@ -27,7 +27,7 @@ async def extract(run_id: str) -> None:
         )
     history_end = date(date.today().year - 1, 12, 31)
     history_start = date(history_end.year - 4, 1, 1)
-    history_root = ROOT / f"data/raw/source=nasa_power_daily/baseline_end_year={history_end.year}"
+    history_root = ROOT / f"data/raw/source=nasa_power_daily/schema_version=v2/baseline_end_year={history_end.year}"
     missing_history_cities = [
         city for city in cities if not any((history_root / f"city_id={city.city_id}").glob("year=*/*.parquet"))
     ]
@@ -56,9 +56,10 @@ async def extract(run_id: str) -> None:
     write_rows(synthetic_root / "members.parquet", members)
     write_rows(synthetic_root / "member_conditions.parquet", conditions)
 
-    rule_definitions, rule_conditions = compile_rules(rules)
+    rule_definitions, rule_predicates, rule_conditions = compile_rules(rules)
     rules_root = ROOT / f"data/raw/source=regional_rules/run_id={run_id}"
     write_rows(rules_root / "rule_definitions.parquet", rule_definitions)
+    write_rows(rules_root / "rule_predicates.parquet", rule_predicates)
     write_rows(rules_root / "rule_conditions.parquet", rule_conditions)
 
 

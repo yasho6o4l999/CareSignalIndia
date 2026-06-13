@@ -9,7 +9,10 @@ COPY (
         CROSS JOIN LATERAL (
             VALUES
                 ('temperature_2m', temperature_2m),
-                ('precipitation', precipitation)
+                ('daily_max_temperature', temperature_2m),
+                ('daily_min_temperature', minimum_temperature_2m),
+                ('daily_temperature_range', temperature_range),
+                ('daily_precipitation_sum', precipitation)
         ) metrics(metric, metric_value)
     )
     SELECT
@@ -17,6 +20,7 @@ COPY (
         month(observed_date) AS month,
         metric,
         avg(metric_value) AS average_value,
+        quantile_cont(metric_value, 0.10) AS p10_value,
         quantile_cont(metric_value, 0.90) AS p90_value,
         quantile_cont(metric_value, 0.95) AS p95_value,
         min(metric_value) AS minimum_value,

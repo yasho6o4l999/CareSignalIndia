@@ -3,6 +3,9 @@
 CareSignal India is a year-round environmental care-intelligence prototype for digital therapeutics care-operations teams. It combines public environmental forecasts with deterministic synthetic chronic-care member data to create explainable, consent-aware outreach queues.
 
 The initial vertical slice supports Delhi, Mumbai, Bengaluru, Chennai, and Ahmedabad. It models heat, cold, heavy-rain, and particulate-pollution triggers, including a Delhi winter-pollution rule.
+The regional catalog now also includes Lucknow and Jaipur, plus compound scenarios for monsoon disruption,
+northeast-monsoon rain and wind, coastal heat-humidity stress, sustained Ahmedabad daytime and nighttime
+heat, coastal high-wind disruption, winter cold-plus-pollution exposure, and Jaipur temperature swings.
 
 ## Architecture
 
@@ -62,6 +65,24 @@ Rules may use either a fixed absolute threshold or a city/month historical perce
 maximum temperature for the matching calendar month, calculated from the previous five complete years.
 Absolute heat rules remain separate because a locally unusual condition and an absolute severe condition
 represent different operational signals.
+
+Rules may contain multiple environmental predicates. Every predicate must be satisfied during the same
+forecast hour before the rule-level persistence clock advances. This supports compound scenarios without
+hardcoding city-specific logic into SQL.
+
+### Regional Scenario Catalog
+
+| Scenario | Region | Evidence required |
+|---|---|---|
+| Winter particulate pollution | Delhi | Sustained PM2.5 during October-January |
+| Monsoon disruption | Mumbai | Daily rainfall above the local p95 during June-September |
+| Northeast-monsoon disruption | Chennai | Local p95 daily rainfall combined with high wind |
+| Coastal heat-humidity stress | Mumbai and Chennai | High apparent-temperature uplift combined with high humidity |
+| Sustained daytime and nighttime heat | Ahmedabad | Local p95 daily maximum combined with local p90 daily minimum |
+| Coastal high-wind disruption | Mumbai and Chennai | Local p90 daily rainfall combined with high wind |
+| Winter cold-pollution compound | Delhi and Lucknow | Elevated PM2.5 combined with temperature below local p10 |
+| Temperature swing | Jaipur | Daily temperature range above local p95 |
+| Locally unusual heat | All supported cities | Temperature above the matching city/month p95 |
 
 The five-year NASA POWER backfill is cached under a `baseline_end_year` partition. Six-hour forecast runs
 reuse that snapshot, and a new historical snapshot is fetched only when a new complete calendar year becomes

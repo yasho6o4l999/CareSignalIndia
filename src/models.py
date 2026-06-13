@@ -43,6 +43,8 @@ class HistoricalWeatherRecord(BaseModel):
     city_id: str
     observed_date: datetime
     temperature_2m: float = Field(ge=-80, le=80)
+    minimum_temperature_2m: float = Field(ge=-80, le=80)
+    temperature_range: float = Field(ge=0, le=100)
     precipitation: float = Field(ge=0, le=1000)
     source: Literal["nasa_power_daily"] = "nasa_power_daily"
     extracted_at: datetime

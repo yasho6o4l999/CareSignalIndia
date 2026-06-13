@@ -38,16 +38,23 @@ def test_missing_hour_breaks_persistence_window(tmp_path) -> None:
             "rule_id": "three_hour_heat",
             "city_id": "delhi",
             "month": start.month,
-            "metric": "apparent_temperature",
-            "operator": "greater_than_or_equal",
-            "operator_label": "at or above",
-            "comparison": "absolute",
-            "threshold": 40.0,
-            "baseline_percentile": None,
+            "condition_logic": "all",
+            "predicate_count": 1,
             "persistence_hours": 3,
             "severity": "high",
         }
     ]
+    rule_predicate = [{
+        "ruleset_version": "test",
+        "rule_id": "three_hour_heat",
+        "predicate_index": 1,
+        "metric": "apparent_temperature",
+        "operator": "greater_than_or_equal",
+        "operator_label": "at or above",
+        "comparison": "absolute",
+        "threshold": 40.0,
+        "baseline_percentile": None,
+    }]
     rule_condition = [{"ruleset_version": "test", "rule_id": "three_hour_heat", "condition": "diabetes"}]
     member = [
         {
@@ -66,6 +73,8 @@ def test_missing_hour_breaks_persistence_window(tmp_path) -> None:
             "city_id": "delhi",
             "observed_date": start - timedelta(days=365),
             "temperature_2m": 35.0,
+            "minimum_temperature_2m": 25.0,
+            "temperature_range": 10.0,
             "precipitation": 0.0,
         }
     ]
@@ -74,10 +83,11 @@ def test_missing_hour_breaks_persistence_window(tmp_path) -> None:
     write_rows(raw / f"source=open_meteo_weather/run_id={run_id}/delhi.parquet", weather)
     write_rows(raw / f"source=open_meteo_air_quality/run_id={run_id}/delhi.parquet", air)
     write_rows(raw / f"source=regional_rules/run_id={run_id}/rule_definitions.parquet", rule_definition)
+    write_rows(raw / f"source=regional_rules/run_id={run_id}/rule_predicates.parquet", rule_predicate)
     write_rows(raw / f"source=regional_rules/run_id={run_id}/rule_conditions.parquet", rule_condition)
     write_rows(raw / f"source=synthetic_members/run_id={run_id}/members.parquet", member)
     write_rows(raw / f"source=synthetic_members/run_id={run_id}/member_conditions.parquet", member_condition)
-    write_rows(raw / "source=nasa_power_daily/baseline_end_year=2025/city_id=delhi/year=2025/data.parquet", historical)
+    write_rows(raw / "source=nasa_power_daily/schema_version=v2/baseline_end_year=2025/city_id=delhi/year=2025/data.parquet", historical)
 
     build_marts(tmp_path, run_id)
 

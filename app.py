@@ -4,6 +4,7 @@ from pathlib import Path
 import duckdb
 import streamlit as st
 
+from src.config import load_cities
 from src.sql import render_sql
 
 
@@ -50,7 +51,7 @@ st.subheader("Stakeholder alerts")
 st.dataframe(alerts, width="stretch")
 
 st.subheader("Member outreach queue")
-city = st.selectbox("City", ["All", "delhi", "mumbai", "bengaluru", "chennai", "ahmedabad"])
+city = st.selectbox("City", ["All", *[city.city_id for city in load_cities()]])
 selected_city = None if city == "All" else city
 queue = connection.execute(
     render_sql(

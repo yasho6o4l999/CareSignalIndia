@@ -29,4 +29,15 @@ cities:
     longitude: 72.5714
     timezone: Asia/Kolkata
     climate_zone: west_inland
-
+  - city_id: lucknow
+    city_name: Lucknow
+    latitude: 26.8467
+    longitude: 80.9462
+    timezone: Asia/Kolkata
+    climate_zone: north_inland
+  - city_id: jaipur
+    city_name: Jaipur
+    latitude: 26.9124
+    longitude: 75.7873
+    timezone: Asia/Kolkata
+    climate_zone: northwest_inland

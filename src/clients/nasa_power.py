@@ -49,7 +49,7 @@ class NasaPowerClient:
     async def fetch_daily_history(self, city: City, start: date, end: date) -> list[HistoricalWeatherRecord]:
         payload = await self._get_json(
             {
-                "parameters": "T2M_MAX,PRECTOTCORR",
+                "parameters": "T2M_MAX,T2M_MIN,PRECTOTCORR",
                 "community": "SB",
                 "longitude": city.longitude,
                 "latitude": city.latitude,
@@ -61,18 +61,26 @@ class NasaPowerClient:
         )
         parameters = payload["properties"]["parameter"]
         temperature = parameters["T2M_MAX"]
+        minimum_temperature = parameters["T2M_MIN"]
         precipitation = parameters["PRECTOTCORR"]
         extracted_at = datetime.now(timezone.utc)
         records: list[HistoricalWeatherRecord] = []
         for date_key, temperature_value in temperature.items():
             precipitation_value = precipitation.get(date_key)
-            if temperature_value == MISSING_VALUE or precipitation_value in (None, MISSING_VALUE):
+            minimum_temperature_value = minimum_temperature.get(date_key)
+            if (
+                temperature_value == MISSING_VALUE
+                or minimum_temperature_value in (None, MISSING_VALUE)
+                or precipitation_value in (None, MISSING_VALUE)
+            ):
                 continue
             records.append(
                 HistoricalWeatherRecord(
                     city_id=city.city_id,
                     observed_date=datetime.strptime(date_key, "%Y%m%d").replace(tzinfo=timezone.utc),
                     temperature_2m=temperature_value,
+                    minimum_temperature_2m=minimum_temperature_value,
+                    temperature_range=temperature_value - minimum_temperature_value,
                     precipitation=precipitation_value,
                     extracted_at=extracted_at,
                 )

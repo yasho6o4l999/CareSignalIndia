@@ -1,56 +1,166 @@
 rules:
   - rule_id: heat_stress
-    metric: apparent_temperature
-    operator: greater_than_or_equal
-    threshold: 40
+    predicates:
+      - metric: apparent_temperature
+        operator: greater_than_or_equal
+        threshold: 40
     persistence_hours: 3
     severity: high
     relevant_conditions: [diabetes, cardiovascular, renal, respiratory]
-    cities: [delhi, mumbai, bengaluru, chennai, ahmedabad]
+    cities: [delhi, mumbai, bengaluru, chennai, ahmedabad, lucknow, jaipur]
     months: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+
   - rule_id: locally_unusual_heat
-    metric: temperature_2m
-    operator: greater_than_or_equal
-    comparison: baseline_percentile
-    baseline_percentile: p95
+    predicates:
+      - metric: temperature_2m
+        operator: greater_than_or_equal
+        comparison: baseline_percentile
+        baseline_percentile: p95
     persistence_hours: 3
     severity: medium
     relevant_conditions: [diabetes, cardiovascular, renal, respiratory]
-    cities: [delhi, mumbai, bengaluru, chennai, ahmedabad]
+    cities: [delhi, mumbai, bengaluru, chennai, ahmedabad, lucknow, jaipur]
     months: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+
   - rule_id: cold_stress
-    metric: apparent_temperature
-    operator: less_than_or_equal
-    threshold: 10
+    predicates:
+      - metric: apparent_temperature
+        operator: less_than_or_equal
+        threshold: 10
     persistence_hours: 3
     severity: medium
     relevant_conditions: [cardiovascular, respiratory]
-    cities: [delhi, ahmedabad]
+    cities: [delhi, ahmedabad, lucknow, jaipur]
     months: [11, 12, 1, 2]
+
   - rule_id: heavy_rain
-    metric: precipitation
-    operator: greater_than_or_equal
-    threshold: 20
+    predicates:
+      - metric: precipitation
+        operator: greater_than_or_equal
+        threshold: 20
     persistence_hours: 1
     severity: medium
     relevant_conditions: [diabetes, cardiovascular, renal, respiratory]
-    cities: [delhi, mumbai, bengaluru, chennai, ahmedabad]
+    cities: [delhi, mumbai, bengaluru, chennai, ahmedabad, lucknow, jaipur]
     months: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+
+  - rule_id: mumbai_monsoon_disruption
+    predicates:
+      - metric: daily_precipitation_sum
+        operator: greater_than_or_equal
+        comparison: baseline_percentile
+        baseline_percentile: p95
+    persistence_hours: 6
+    severity: high
+    relevant_conditions: [diabetes, cardiovascular, renal, respiratory]
+    cities: [mumbai]
+    months: [6, 7, 8, 9]
+
+  - rule_id: chennai_northeast_monsoon_disruption
+    predicates:
+      - metric: daily_precipitation_sum
+        operator: greater_than_or_equal
+        comparison: baseline_percentile
+        baseline_percentile: p95
+      - metric: wind_speed
+        operator: greater_than_or_equal
+        threshold: 35
+    persistence_hours: 3
+    severity: high
+    relevant_conditions: [diabetes, cardiovascular, renal, respiratory]
+    cities: [chennai]
+    months: [10, 11, 12]
+
+  - rule_id: coastal_heat_humidity_stress
+    predicates:
+      - metric: apparent_temperature_uplift
+        operator: greater_than_or_equal
+        threshold: 5
+      - metric: relative_humidity
+        operator: greater_than_or_equal
+        threshold: 75
+    persistence_hours: 3
+    severity: medium
+    relevant_conditions: [diabetes, cardiovascular, respiratory]
+    cities: [mumbai, chennai]
+    months: [3, 4, 5, 6, 7, 8, 9]
+
+  - rule_id: ahmedabad_sustained_hot_nights
+    predicates:
+      - metric: daily_max_temperature
+        operator: greater_than_or_equal
+        comparison: baseline_percentile
+        baseline_percentile: p95
+      - metric: daily_min_temperature
+        operator: greater_than_or_equal
+        comparison: baseline_percentile
+        baseline_percentile: p90
+    persistence_hours: 24
+    severity: high
+    relevant_conditions: [diabetes, cardiovascular, renal]
+    cities: [ahmedabad]
+    months: [3, 4, 5, 6]
+
+  - rule_id: coastal_high_wind_disruption
+    predicates:
+      - metric: daily_precipitation_sum
+        operator: greater_than_or_equal
+        comparison: baseline_percentile
+        baseline_percentile: p90
+      - metric: wind_speed
+        operator: greater_than_or_equal
+        threshold: 50
+    persistence_hours: 3
+    severity: high
+    relevant_conditions: [diabetes, cardiovascular, renal, respiratory]
+    cities: [mumbai, chennai]
+    months: [5, 6, 10, 11, 12]
+
+  - rule_id: winter_cold_pollution_compound
+    predicates:
+      - metric: pm2_5
+        operator: greater_than_or_equal
+        threshold: 60
+      - metric: temperature_2m
+        operator: less_than_or_equal
+        comparison: baseline_percentile
+        baseline_percentile: p10
+    persistence_hours: 6
+    severity: high
+    relevant_conditions: [respiratory, cardiovascular]
+    cities: [delhi, lucknow]
+    months: [11, 12, 1]
+
+  - rule_id: jaipur_temperature_swing
+    predicates:
+      - metric: daily_temperature_range
+        operator: greater_than_or_equal
+        comparison: baseline_percentile
+        baseline_percentile: p95
+    persistence_hours: 12
+    severity: medium
+    relevant_conditions: [cardiovascular, respiratory]
+    cities: [jaipur]
+    months: [10, 11, 12, 1, 2, 3]
+
   - rule_id: delhi_winter_pm25
-    metric: pm2_5
-    operator: greater_than_or_equal
-    threshold: 60
+    predicates:
+      - metric: pm2_5
+        operator: greater_than_or_equal
+        threshold: 60
     persistence_hours: 12
     severity: high
     relevant_conditions: [respiratory, cardiovascular]
     cities: [delhi]
     months: [10, 11, 12, 1]
+
   - rule_id: particulate_pollution
-    metric: pm2_5
-    operator: greater_than_or_equal
-    threshold: 60
+    predicates:
+      - metric: pm2_5
+        operator: greater_than_or_equal
+        threshold: 60
     persistence_hours: 12
     severity: high
     relevant_conditions: [respiratory, cardiovascular]
-    cities: [mumbai, bengaluru, chennai, ahmedabad]
+    cities: [mumbai, bengaluru, chennai, ahmedabad, lucknow, jaipur]
     months: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]

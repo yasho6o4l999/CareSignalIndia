@@ -5,7 +5,7 @@ from src.config import Rule, load_cities, load_rules
 
 
 def test_configuration_is_valid() -> None:
-    assert len(load_cities()) == 5
+    assert len(load_cities()) == 7
     assert any(rule.rule_id == "delhi_winter_pm25" for rule in load_rules())
 
 
@@ -13,9 +13,7 @@ def test_rule_rejects_invalid_month() -> None:
     with pytest.raises(ValidationError):
         Rule(
             rule_id="invalid",
-            metric="pm2_5",
-            operator="greater_than_or_equal",
-            threshold=60,
+            predicates=[{"metric": "pm2_5", "operator": "greater_than_or_equal", "threshold": 60}],
             persistence_hours=1,
             severity="high",
             relevant_conditions=["respiratory"],
@@ -28,9 +26,7 @@ def test_rule_rejects_empty_city_list() -> None:
     with pytest.raises(ValidationError):
         Rule(
             rule_id="invalid",
-            metric="pm2_5",
-            operator="greater_than_or_equal",
-            threshold=60,
+            predicates=[{"metric": "pm2_5", "operator": "greater_than_or_equal", "threshold": 60}],
             persistence_hours=1,
             severity="high",
             relevant_conditions=["respiratory"],
@@ -43,9 +39,11 @@ def test_baseline_rule_requires_percentile_without_fixed_threshold() -> None:
     with pytest.raises(ValidationError):
         Rule(
             rule_id="invalid_baseline",
-            metric="temperature_2m",
-            operator="greater_than_or_equal",
-            comparison="baseline_percentile",
+            predicates=[{
+                "metric": "temperature_2m",
+                "operator": "greater_than_or_equal",
+                "comparison": "baseline_percentile",
+            }],
             persistence_hours=3,
             severity="medium",
             relevant_conditions=["cardiovascular"],
