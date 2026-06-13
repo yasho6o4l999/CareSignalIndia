@@ -19,6 +19,7 @@ Metric = Literal[
     "wind_speed",
     "pm2_5",
 ]
+SourceName = Literal["open_meteo_weather", "open_meteo_air_quality", "nasa_power_daily"]
 
 
 class City(BaseModel):
@@ -28,6 +29,19 @@ class City(BaseModel):
     longitude: float = Field(ge=-180, le=180)
     timezone: str
     climate_zone: str
+
+
+class PublicationPolicy(BaseModel):
+    required_sources: list[SourceName] = Field(min_length=1)
+    minimum_complete_cities: int = Field(ge=1)
+    minimum_complete_city_ratio: float = Field(gt=0, le=1)
+
+    @field_validator("required_sources")
+    @classmethod
+    def unique_required_sources(cls, value: list[SourceName]) -> list[SourceName]:
+        if len(value) != len(set(value)):
+            raise ValueError("required_sources must be unique")
+        return value
 
 
 class RulePredicate(BaseModel):
@@ -73,6 +87,13 @@ def _load_yaml(path: Path) -> dict:
 
 def load_cities() -> list[City]:
     return [City.model_validate(item) for item in _load_yaml(ROOT / "config/cities.yml")["cities"]]
+
+
+def load_publication_policy() -> PublicationPolicy:
+    policy = PublicationPolicy.model_validate(_load_yaml(ROOT / "config/publication_policy.yml"))
+    if policy.minimum_complete_cities > len(load_cities()):
+        raise ValueError("minimum_complete_cities cannot exceed configured cities")
+    return policy
 
 
 def load_rules() -> list[Rule]:

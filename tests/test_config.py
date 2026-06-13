@@ -1,12 +1,13 @@
 import pytest
 from pydantic import ValidationError
 
-from src.config import Rule, load_cities, load_rules
+from src.config import Rule, load_cities, load_publication_policy, load_rules
 
 
 def test_configuration_is_valid() -> None:
     assert len(load_cities()) == 7
     assert any(rule.rule_id == "delhi_winter_pm25" for rule in load_rules())
+    assert load_publication_policy().minimum_complete_cities == 5
 
 
 def test_rule_rejects_invalid_month() -> None:

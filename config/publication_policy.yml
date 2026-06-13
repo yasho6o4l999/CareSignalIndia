@@ -1,0 +1,6 @@
+required_sources:
+  - open_meteo_weather
+  - open_meteo_air_quality
+  - nasa_power_daily
+minimum_complete_cities: 5
+minimum_complete_city_ratio: 0.70

@@ -114,6 +114,11 @@ pass before the directory is atomically published. Failed runs remain recorded i
 the latest successful dashboard run. The local retention policy keeps the five newest forecast/raw and
 processed snapshots while preserving SQLite run history and reusable reference datasets.
 
+Publication readiness is configured in `config/publication_policy.yml`. A city is complete only when weather,
+air-quality, and historical-baseline data are available. Seven complete cities produces `success`; at least
+five complete cities produces `partial_success`; fewer than five prevents publication. Isolated source-city
+failures are quarantined, shown in the dashboard, and do not advance their previous successful watermarks.
+
 Synthetic member data contains no names, contact details, exact addresses, or real identifiers. Outreach priority is an operational demonstration, not a clinical risk score.
 
 ## Scheduling

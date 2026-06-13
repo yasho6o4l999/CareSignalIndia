@@ -86,6 +86,13 @@ st.subheader("Pipeline health")
 recent_runs = metadata.query("queries/recent_runs.sql", (10,))
 source_readiness = metadata.query("queries/latest_source_readiness.sql", (run_id,))
 invalid_counts = metadata.query("queries/latest_invalid_counts.sql", (run_id,))
+failed_sources = [dict(row) for row in source_readiness if row["status"] == "failed"]
+if latest_run["status"] == "partial_success":
+    unavailable = sorted({row["city_id"] for row in failed_sources})
+    st.warning(
+        f"This is a partial publication. Unavailable cities: {', '.join(unavailable)}. "
+        "Their previous successful watermarks were preserved."
+    )
 st.dataframe([dict(row) for row in recent_runs], width="stretch")
 st.dataframe([dict(row) for row in source_readiness], width="stretch")
 if invalid_counts:

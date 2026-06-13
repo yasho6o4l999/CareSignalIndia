@@ -12,6 +12,10 @@ COPY (
         a.pm10
         FROM read_parquet('{weather_path}') w
         INNER JOIN read_parquet('{air_path}') a USING (city_id, observed_at)
+        INNER JOIN (
+            SELECT DISTINCT city_id
+            FROM read_parquet('{publication_cities_path}')
+        ) publication_cities USING (city_id)
         WHERE w.observed_at >= current_timestamp
     )
     SELECT

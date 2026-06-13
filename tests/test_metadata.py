@@ -30,3 +30,19 @@ def test_failed_run_does_not_become_latest_published(tmp_path) -> None:
     assert store.latest_published_run() is None
     assert store.query("queries/latest_invalid_counts.sql", ("failed-run",))[0]["invalid_records"] == 1
     store.close()
+
+
+def test_partial_success_becomes_latest_published_run(tmp_path) -> None:
+    store = MetadataStore(tmp_path / "pipeline.db")
+    store.start_run("partial-run", "rules-1", "members-1", 2025)
+    store.complete_run(
+        "partial-run",
+        "partial_success",
+        {"extracted": 100, "valid": 100, "invalid": 1, "published": 50},
+        "one city unavailable",
+    )
+
+    latest = store.latest_published_run()
+    assert latest["run_id"] == "partial-run"
+    assert latest["status"] == "partial_success"
+    store.close()

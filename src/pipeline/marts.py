@@ -12,6 +12,7 @@ def build_marts(
     processed: Path | None = None,
     members_root: Path | None = None,
     rules_root: Path | None = None,
+    publication_cities: Path | None = None,
 ) -> None:
     raw = root / "data/raw"
     processed = processed or root / "data/processed" / f"run_id={run_id}"
@@ -23,6 +24,7 @@ def build_marts(
     members_root = members_root or raw / f"source=synthetic_members/run_id={run_id}"
     rules_root = rules_root or raw / f"source=regional_rules/run_id={run_id}"
     members = members_root / "members.parquet"
+    publication_cities = publication_cities or members
     member_conditions = members_root / "member_conditions.parquet"
     rules = rules_root / "rule_definitions.parquet"
     rule_predicates = rules_root / "rule_predicates.parquet"
@@ -38,6 +40,7 @@ def build_marts(
         render_sql(
             "marts/build_historical_baselines.sql",
             history_path=history,
+            publication_cities_path=publication_cities,
             output_path=historical_baselines,
         )
     )
@@ -46,6 +49,7 @@ def build_marts(
             "marts/build_city_conditions.sql",
             weather_path=weather,
             air_path=air,
+            publication_cities_path=publication_cities,
             output_path=city_conditions,
         )
     )

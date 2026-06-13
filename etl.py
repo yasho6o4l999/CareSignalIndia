@@ -2,6 +2,7 @@ import asyncio
 import logging
 import os
 import shutil
+from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
 from pathlib import Path
 
@@ -10,10 +11,11 @@ import duckdb
 
 from src.clients.nasa_power import NasaPowerClient
 from src.clients.open_meteo import OpenMeteoClient
-from src.config import ROOT, load_cities, load_rules
+from src.config import ROOT, load_cities, load_publication_policy, load_rules
 from src.metadata import MetadataStore
 from src.pipeline.marts import build_marts
 from src.quality import run_quality_checks
+from src.readiness import evaluate_readiness
 from src.rules import compile_rules
 from src.storage import write_models, write_rows
 from src.synthetic import generate_members, member_reference_version
@@ -23,6 +25,23 @@ from src.sql import render_sql
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 LOGGER = logging.getLogger("caresignal")
 RETENTION_RUNS = 5
+
+
+@dataclass
+class ExtractionResult:
+    records: int = 0
+    failures: int = 0
+    successful_cities_by_source: dict[str, set[str]] = field(default_factory=dict)
+
+    def record_success(self, source: str, city_id: str, records: int) -> None:
+        self.records += records
+        self.successful_cities_by_source.setdefault(source, set()).add(city_id)
+
+    def merge(self, other: "ExtractionResult") -> None:
+        self.records += other.records
+        self.failures += other.failures
+        for source, cities in other.successful_cities_by_source.items():
+            self.successful_cities_by_source.setdefault(source, set()).update(cities)
 
 
 def latest_timestamp(records: list) -> str | None:
@@ -59,9 +78,21 @@ def ensure_references() -> tuple[Path, Path, str, str]:
     return member_root, rules_root, member_version, ruleset_version
 
 
-async def extract_forecasts(run_id: str, metadata: MetadataStore) -> int:
+def record_source_failure(
+    metadata: MetadataStore,
+    run_id: str,
+    source: str,
+    city_id: str,
+    error: Exception,
+) -> None:
+    metadata.record_failure(run_id, source, city_id, str(error))
+    metadata.quarantine(run_id, source, city_id, error, {"city_id": city_id})
+    LOGGER.warning("Source failure source=%s city_id=%s error=%s", source, city_id, error)
+
+
+async def extract_forecasts(run_id: str, metadata: MetadataStore) -> ExtractionResult:
     cities = load_cities()
-    total = 0
+    extraction = ExtractionResult()
     async with OpenMeteoClient() as client:
         weather_results, air_results = await asyncio.gather(
             asyncio.gather(*(client.fetch_weather(city) for city in cities), return_exceptions=True),
@@ -70,24 +101,26 @@ async def extract_forecasts(run_id: str, metadata: MetadataStore) -> int:
     for source, results in [("open_meteo_weather", weather_results), ("open_meteo_air_quality", air_results)]:
         for city, result in zip(cities, results, strict=True):
             if isinstance(result, Exception):
-                metadata.record_failure(run_id, source, city.city_id, str(result))
-                metadata.quarantine(run_id, source, city.city_id, result, {"city_id": city.city_id})
-                raise result
+                record_source_failure(metadata, run_id, source, city.city_id, result)
+                extraction.failures += 1
+                continue
             count = write_models(ROOT / f"data/raw/source={source}/run_id={run_id}/{city.city_id}.parquet", result)
             metadata.record_readiness(run_id, source, city.city_id, count, latest_timestamp(result))
-            total += count
-    return total
+            extraction.record_success(source, city.city_id, count)
+    return extraction
 
 
-async def ensure_history(run_id: str, metadata: MetadataStore, baseline_end_year: int) -> int:
+async def ensure_history(run_id: str, metadata: MetadataStore, baseline_end_year: int) -> ExtractionResult:
     cities = load_cities()
+    extraction = ExtractionResult()
     history_root = ROOT / f"data/raw/source=nasa_power_daily/schema_version=v2/baseline_end_year={baseline_end_year}"
     missing = [city for city in cities if not any((history_root / f"city_id={city.city_id}").glob("year=*/*.parquet"))]
     cached = [city for city in cities if city not in missing]
     for city in cached:
         metadata.record_readiness(run_id, "nasa_power_daily", city.city_id, 0, f"{baseline_end_year}-12-31")
+        extraction.record_success("nasa_power_daily", city.city_id, 0)
     if not missing:
-        return 0
+        return extraction
 
     start, end = date(baseline_end_year - 4, 1, 1), date(baseline_end_year, 12, 31)
     async with NasaPowerClient() as client:
@@ -95,19 +128,19 @@ async def ensure_history(run_id: str, metadata: MetadataStore, baseline_end_year
             *(client.fetch_daily_history(city, start, end) for city in missing),
             return_exceptions=True,
         )
-    total = 0
     for city, result in zip(missing, results, strict=True):
         if isinstance(result, Exception):
-            metadata.record_failure(run_id, "nasa_power_daily", city.city_id, str(result))
-            metadata.quarantine(run_id, "nasa_power_daily", city.city_id, result, {"city_id": city.city_id})
-            raise result
+            record_source_failure(metadata, run_id, "nasa_power_daily", city.city_id, result)
+            extraction.failures += 1
+            continue
         by_year: dict[int, list] = {}
         for record in result:
             by_year.setdefault(record.observed_date.year, []).append(record)
         for year, records in by_year.items():
-            total += write_models(history_root / f"city_id={city.city_id}/year={year}/data.parquet", records)
+            extraction.records += write_models(history_root / f"city_id={city.city_id}/year={year}/data.parquet", records)
         metadata.record_readiness(run_id, "nasa_power_daily", city.city_id, len(result), latest_timestamp(result))
-    return total
+        extraction.successful_cities_by_source.setdefault("nasa_power_daily", set()).add(city.city_id)
+    return extraction
 
 
 def parquet_count(path: Path) -> int:
@@ -133,6 +166,7 @@ def verify_publication(staging: Path) -> None:
         "active_triggers.parquet",
         "outreach_queue.parquet",
         "stakeholder_alerts.parquet",
+        "publication_cities.parquet",
     }
     missing = expected - {path.name for path in staging.glob("*.parquet")}
     if missing:
@@ -167,25 +201,46 @@ async def main() -> None:
     staging = ROOT / f"data/processed/.staging-{run_id}"
     LOGGER.info("Starting run_id=%s", run_id)
     try:
-        counts["extracted"] += await extract_forecasts(run_id, metadata)
-        counts["extracted"] += await ensure_history(run_id, metadata, baseline_end_year)
+        extraction = await extract_forecasts(run_id, metadata)
+        extraction.merge(await ensure_history(run_id, metadata, baseline_end_year))
+        counts["extracted"] = extraction.records
+        counts["invalid"] = extraction.failures
         counts["valid"] = counts["extracted"]
+        cities = load_cities()
+        readiness = evaluate_readiness(
+            {city.city_id for city in cities},
+            extraction.successful_cities_by_source,
+            load_publication_policy(),
+        )
+        if readiness.status == "failed":
+            raise RuntimeError(f"Publication readiness failed: {readiness.summary}")
 
-        quality_results = run_quality_checks(run_id, str(ROOT / "data/raw"))
+        quality_results = run_quality_checks(run_id, str(ROOT / "data/raw"), len(readiness.complete_cities))
         write_models(staging / "quality_results.parquet", quality_results)
         if any(result.status == "fail" for result in quality_results):
             raise RuntimeError("Fatal data quality failure")
 
-        build_marts(ROOT, run_id, processed=staging, members_root=member_root, rules_root=rules_root)
+        publication_cities = staging / "publication_cities.parquet"
+        write_rows(publication_cities, [{"city_id": city_id} for city_id in sorted(readiness.complete_cities)])
+        build_marts(
+            ROOT,
+            run_id,
+            processed=staging,
+            members_root=member_root,
+            rules_root=rules_root,
+            publication_cities=publication_cities,
+        )
         verify_publication(staging)
         counts["published"] = publish_run(run_id, staging, metadata)
-        for city in load_cities():
-            metadata.upsert_watermark(run_id, "open_meteo_weather", city.city_id, "latest_successful_run", run_id)
-            metadata.upsert_watermark(run_id, "open_meteo_air_quality", city.city_id, "latest_successful_run", run_id)
-            metadata.upsert_watermark(run_id, "nasa_power_daily", city.city_id, "baseline_end_year", str(baseline_end_year))
-        metadata.complete_run(run_id, "success", counts)
+        for source, successful_cities in extraction.successful_cities_by_source.items():
+            for city_id in successful_cities:
+                watermark_type = "baseline_end_year" if source == "nasa_power_daily" else "latest_successful_run"
+                value = str(baseline_end_year) if source == "nasa_power_daily" else run_id
+                metadata.upsert_watermark(run_id, source, city_id, watermark_type, value)
+        run_message = readiness.summary if readiness.status == "partial_success" else None
+        metadata.complete_run(run_id, readiness.status, counts, run_message)
         apply_retention()
-        LOGGER.info("Completed run_id=%s", run_id)
+        LOGGER.info("Completed run_id=%s status=%s %s", run_id, readiness.status, readiness.summary)
     except Exception as error:
         if staging.exists():
             shutil.rmtree(staging)

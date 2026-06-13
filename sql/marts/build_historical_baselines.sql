@@ -1,11 +1,15 @@
 COPY (
     WITH metric_values AS (
         SELECT
-            city_id,
+            history.city_id,
             observed_date,
             metric,
             metric_value
-        FROM read_parquet('{history_path}', hive_partitioning = true)
+        FROM read_parquet('{history_path}', hive_partitioning = true) history
+        INNER JOIN (
+            SELECT DISTINCT city_id
+            FROM read_parquet('{publication_cities_path}')
+        ) publication_cities USING (city_id)
         CROSS JOIN LATERAL (
             VALUES
                 ('temperature_2m', temperature_2m),
