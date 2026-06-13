@@ -128,7 +128,14 @@ SQLite at `data/metadata/pipeline.db` is the authoritative operational state sto
 source-city readiness, watermarks, invalid records, and published-dataset lineage. The dashboard selects the
 latest published run from SQLite; `latest_run.json` is no longer used.
 
-Synthetic members are cached by generator, weighted city distribution, seed, count, and city-set version under `data/reference/synthetic_members/`.
+Synthetic member dimensions are transactionally persisted in SQLite. A configured generation anchor date
+ensures identical configuration produces identical members across execution dates. The current dimensions
+are exported from SQLite into immutable, city-partitioned analytical snapshots under
+`data/reference/member_snapshots/`.
+
+Each member snapshot is published atomically after its manifest validates file checksums, schemas, row
+counts, unique member IDs, and member-condition referential integrity. Snapshot metadata and checksums are
+registered in SQLite, and every pipeline run records the exact `member_snapshot_id` it used.
 Compiled regional rules are cached by deterministic ruleset hash under `data/reference/regional_rules/`.
 Forecast-driven marts remain immutable per-run snapshots.
 
@@ -161,6 +168,7 @@ The required reviewer workflow is manual. `deployment/crontab.example` demonstra
 - Open-Meteo provides modeled air-quality forecasts rather than ground-station observations.
 - No messages are sent; the project only generates stakeholder and outreach queues.
 - Severity-escalation repeat outreach is configured but requires production action-history data before it can be enforced.
+- Member dimensions currently represent latest state; production ingestion should add effective-dated history and incremental changes.
 - The scheduler example is not installed automatically.
 
 ## Next Improvements

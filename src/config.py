@@ -1,6 +1,7 @@
 import hashlib
 import json
 import os
+from datetime import date
 from pathlib import Path
 from typing import Any, Literal
 
@@ -98,6 +99,7 @@ class OutreachPolicy(BaseModel):
 class SyntheticMemberPolicy(BaseModel):
     member_count: int = Field(ge=1)
     seed: int
+    anchor_date: date
     city_weights: dict[str, float] = Field(default_factory=dict)
 
 

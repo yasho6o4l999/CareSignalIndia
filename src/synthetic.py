@@ -15,7 +15,7 @@ def member_reference_version(cities: list[City], policy: SyntheticMemberPolicy) 
     city_ids = ",".join(sorted(city.city_id for city in cities))
     weights = ",".join(f"{key}:{value}" for key, value in sorted(policy.city_weights.items()))
     digest = hashlib.sha256(
-        f"{GENERATOR_VERSION}|{policy.member_count}|{policy.seed}|{city_ids}|{weights}".encode()
+        f"{GENERATOR_VERSION}|{policy.member_count}|{policy.seed}|{policy.anchor_date}|{city_ids}|{weights}".encode()
     ).hexdigest()[:12]
     return f"{GENERATOR_VERSION}-{digest}"
 
@@ -25,8 +25,10 @@ def generate_members(
     count: int = 5000,
     seed: int = 20260612,
     city_weights: dict[str, float] | None = None,
+    anchor_date: date | None = None,
 ) -> tuple[list[dict], list[dict]]:
     randomizer = random.Random(seed)
+    anchor_date = anchor_date or date(2026, 6, 1)
     weights = [city_weights.get(city.city_id, 1.0) for city in cities] if city_weights else None
     members: list[dict] = []
     member_conditions: list[dict] = []
@@ -43,7 +45,7 @@ def generate_members(
                 "preferred_language": randomizer.choice(LANGUAGES),
                 "preferred_channel": randomizer.choice(CHANNELS),
                 "outreach_consent": randomizer.random() < 0.9,
-                "last_contact_date": date.today() - timedelta(days=randomizer.randint(0, 60)),
+                "last_contact_date": anchor_date - timedelta(days=randomizer.randint(0, 60)),
                 "generator_version": GENERATOR_VERSION,
             }
         )

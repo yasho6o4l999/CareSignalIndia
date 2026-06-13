@@ -1,6 +1,6 @@
 import json
 import sqlite3
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -59,12 +59,71 @@ class MetadataStore:
         member_version: str,
         baseline_end_year: int,
         configuration_version: str | None = None,
+        member_snapshot_id: str | None = None,
     ) -> None:
         with self.connection:
             self.connection.execute(
                 read_sql("mutations/start_run.sql"),
-                (run_id, utc_now(), ruleset_version, member_version, baseline_end_year, configuration_version),
+                (
+                    run_id, utc_now(), ruleset_version, member_version, baseline_end_year,
+                    configuration_version, member_snapshot_id,
+                ),
             )
+
+    def replace_member_dimensions(self, members: list[dict], conditions: list[dict]) -> None:
+        updated_at = utc_now()
+        member_rows = [
+            (
+                row["member_id"], row["city_id"], row["age_band"], row["preferred_language"],
+                row["preferred_channel"], int(row["outreach_consent"]),
+                row["last_contact_date"].isoformat(), row["generator_version"], updated_at,
+            )
+            for row in members
+        ]
+        condition_rows = [(row["member_id"], row["condition"]) for row in conditions]
+        with self.connection:
+            self.connection.executescript(read_sql("mutations/clear_member_dimensions.sql"))
+            self.connection.executemany(read_sql("mutations/insert_member.sql"), member_rows)
+            self.connection.executemany(
+                read_sql("mutations/insert_member_condition.sql"), condition_rows
+            )
+
+    def register_member_snapshot(
+        self,
+        snapshot_id: str,
+        generator_version: str,
+        configuration_version: str,
+        manifest_path: Path,
+        checksum: str,
+        member_count: int,
+        condition_count: int,
+    ) -> None:
+        with self.connection:
+            self.connection.execute(
+                read_sql("mutations/register_member_snapshot.sql"),
+                (
+                    snapshot_id, generator_version, configuration_version, str(manifest_path),
+                    checksum, member_count, condition_count, utc_now(),
+                ),
+            )
+
+    def current_members(self) -> list[dict]:
+        return [
+            {
+                **dict(row),
+                "outreach_consent": bool(row["outreach_consent"]),
+                "last_contact_date": date.fromisoformat(row["last_contact_date"]),
+            }
+            for row in self.connection.execute(read_sql("queries/current_members.sql")).fetchall()
+        ]
+
+    def current_member_conditions(self) -> list[dict]:
+        return [
+            dict(row)
+            for row in self.connection.execute(
+                read_sql("queries/current_member_conditions.sql")
+            ).fetchall()
+        ]
 
     def complete_run(self, run_id: str, status: str, counts: dict[str, int], error_message: str | None = None) -> None:
         now = utc_now()

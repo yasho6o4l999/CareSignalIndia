@@ -1,9 +1,11 @@
+from datetime import date
+
 from src.metadata import MetadataStore
 
 
 def test_metadata_run_lifecycle_and_latest_publication(tmp_path) -> None:
     store = MetadataStore(tmp_path / "pipeline.db")
-    store.start_run("run-1", "rules-1", "members-1", 2025, "config-1")
+    store.start_run("run-1", "rules-1", "members-1", 2025, "config-1", "snapshot-1")
     store.record_readiness("run-1", "weather", "delhi", 10, "2026-06-13T00:00:00+00:00")
     store.record_dataset("run-1", "alerts", tmp_path / "alerts.parquet", 3)
     store.upsert_watermark("run-1", "weather", "delhi", "latest_successful_run", "run-1")
@@ -17,6 +19,7 @@ def test_metadata_run_lifecycle_and_latest_publication(tmp_path) -> None:
     assert latest["run_id"] == "run-1"
     assert latest["records_published"] == 3
     assert latest["configuration_version"] == "config-1"
+    assert latest["member_snapshot_id"] == "snapshot-1"
     assert store.query("queries/latest_source_readiness.sql", ("run-1",))[0]["status"] == "success"
     assert store.watermark("weather", "delhi", "latest_successful_run") == "run-1"
     store.close()
@@ -47,4 +50,31 @@ def test_partial_success_becomes_latest_published_run(tmp_path) -> None:
     latest = store.latest_published_run()
     assert latest["run_id"] == "partial-run"
     assert latest["status"] == "partial_success"
+    store.close()
+
+
+def test_member_dimensions_and_snapshot_registry_are_transactional(tmp_path) -> None:
+    store = MetadataStore(tmp_path / "pipeline.db")
+    members = [{
+        "member_id": "M-1",
+        "city_id": "delhi",
+        "age_band": "40-59",
+        "preferred_language": "Hindi",
+        "preferred_channel": "app",
+        "outreach_consent": True,
+        "last_contact_date": date(2026, 6, 1),
+        "generator_version": "v1",
+    }]
+    conditions = [{"member_id": "M-1", "condition": "diabetes"}]
+
+    store.replace_member_dimensions(members, conditions)
+    store.register_member_snapshot(
+        "snapshot-1", "v1", "config-1", tmp_path / "manifest.json", "checksum", 1, 1
+    )
+
+    assert store.connection.execute("SELECT count(*) FROM dim_member").fetchone()[0] == 1
+    assert store.connection.execute("SELECT count(*) FROM bridge_member_condition").fetchone()[0] == 1
+    assert store.connection.execute("SELECT status FROM member_snapshots").fetchone()[0] == "published"
+    assert store.current_members()[0]["last_contact_date"] == date(2026, 6, 1)
+    assert store.current_member_conditions() == conditions
     store.close()

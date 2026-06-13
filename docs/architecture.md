@@ -48,7 +48,7 @@ flowchart TD
         Forecasts["Weather + Air-Quality Forecasts"]
         History["Historical Weather"]
         Rules["Regional Rules"]
-        Members["Synthetic Members"]
+        Members["SQLite Member Dimensions<br/>+ validated Parquet snapshot"]
     end
 
     Forecasts --> RawForecast["Validated Incremental Forecast Snapshots"]
@@ -118,9 +118,9 @@ flowchart TD
 | Storage | Stores | Why it is used |
 |---|---|---|
 | Parquet `data/raw/` | Forecast snapshots and historical source data | Columnar, compressed, and queryable directly by DuckDB |
-| Parquet `data/reference/` | Versioned compiled rules and synthetic members | Reusable across runs; avoids unnecessary regeneration |
+| Parquet `data/reference/` | Versioned compiled rules and validated member snapshots | Reusable, immutable analytical inputs for DuckDB |
 | Parquet `data/processed/` | Immutable published analytical runs | Dashboard never reads partially built output |
-| SQLite `data/metadata/pipeline.db` | Runs, readiness, watermarks, rejects, migrations, and lineage | Small transactional driver state for incremental and publication decisions |
+| SQLite `data/metadata/pipeline.db` | Runs, member dimensions, snapshot registry, readiness, watermarks, rejects, migrations, and lineage | Transactional operational state and member system of record |
 | Quarantine in SQLite | Invalid source-city events and payload context | Makes failures visible without storing generated data in Git |
 
 ## Current Data Contracts
@@ -130,7 +130,8 @@ flowchart TD
 | Forecast raw | Weather and air-quality city snapshots | `source + city_id + observed_at`, partitioned by `run_id` |
 | Historical raw | NASA POWER daily records | `city_id + observed_date`, partitioned by baseline year, city, and year |
 | Regional rule reference | Definitions, predicates, and relevant conditions | Deterministic `ruleset_version` |
-| Synthetic member reference | Members and member conditions | Deterministic generator and city-set version |
+| Member operational dimensions | Current members and member-condition bridge | SQLite primary and foreign keys |
+| Member analytical snapshot | City-partitioned members and conditions plus manifest | Deterministic `member_snapshot_id` |
 | Publication scope | Complete cities eligible for a run | `run_id + city_id` |
 | Active trigger | Sustained rule breach | `ruleset_version + rule_id + city_id + window_start` |
 | Outreach queue | Consent-aware member-rule action | `member_id + rule_id + window_start` |

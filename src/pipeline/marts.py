@@ -24,9 +24,19 @@ def build_marts(
     air = raw / f"source=open_meteo_air_quality/run_id={run_id}" / "*.parquet"
     members_root = members_root or raw / f"source=synthetic_members/run_id={run_id}"
     rules_root = rules_root or raw / f"source=regional_rules/run_id={run_id}"
-    members = members_root / "members.parquet"
+    partitioned_members = members_root / "members"
+    partitioned_conditions = members_root / "member_conditions"
+    members = (
+        partitioned_members / "**/*.parquet"
+        if partitioned_members.exists()
+        else members_root / "members.parquet"
+    )
     publication_cities = publication_cities or members
-    member_conditions = members_root / "member_conditions.parquet"
+    member_conditions = (
+        partitioned_conditions / "**/*.parquet"
+        if partitioned_conditions.exists()
+        else members_root / "member_conditions.parquet"
+    )
     rules = rules_root / "rule_definitions.parquet"
     rule_predicates = rules_root / "rule_predicates.parquet"
     rule_conditions = rules_root / "rule_conditions.parquet"

@@ -1,6 +1,7 @@
 synthetic_members:
   member_count: 5000
   seed: 20260612
+  anchor_date: 2026-06-01
   city_weights:
     delhi: 1.2
     mumbai: 1.1

@@ -26,6 +26,7 @@ from src.metadata import MetadataStore
 from src.pipeline.marts import build_marts
 from src.quality import run_quality_checks
 from src.readiness import evaluate_readiness
+from src.reference import MANIFEST_NAME, publish_member_snapshot, verify_member_snapshot
 from src.rules import compile_rules
 from src.storage import write_models, write_rows
 from src.synthetic import generate_members, member_reference_version
@@ -88,21 +89,37 @@ def latest_timestamp(records: list) -> str | None:
     return max(values).isoformat() if values else None
 
 
-def ensure_references() -> tuple[Path, Path, str, str]:
+def ensure_references(metadata: MetadataStore, config_version: str) -> tuple[Path, Path, str, str]:
     cities = load_cities()
     member_policy = load_runtime_settings().synthetic_members
     member_version = member_reference_version(cities, member_policy)
-    member_root = ROOT / f"data/reference/synthetic_members/version={member_version}"
-    member_files = [member_root / "members.parquet", member_root / "member_conditions.parquet"]
-    if not all(path.exists() for path in member_files):
-        members, conditions = generate_members(
-            cities,
-            count=member_policy.member_count,
-            seed=member_policy.seed,
-            city_weights=member_policy.city_weights,
-        )
-        write_rows(member_root / "members.parquet", members)
-        write_rows(member_root / "member_conditions.parquet", conditions)
+    members, member_conditions = generate_members(
+        cities,
+        count=member_policy.member_count,
+        seed=member_policy.seed,
+        city_weights=member_policy.city_weights,
+        anchor_date=member_policy.anchor_date,
+    )
+    metadata.replace_member_dimensions(members, member_conditions)
+    members = metadata.current_members()
+    member_conditions = metadata.current_member_conditions()
+    member_root, member_manifest, member_manifest_checksum = publish_member_snapshot(
+        ROOT / "data/reference/member_snapshots",
+        member_version,
+        config_version,
+        members,
+        member_conditions,
+    )
+    verify_member_snapshot(member_root)
+    metadata.register_member_snapshot(
+        member_version,
+        members[0]["generator_version"],
+        member_manifest["configuration_version"],
+        member_root / MANIFEST_NAME,
+        member_manifest_checksum,
+        member_manifest["member_count"],
+        member_manifest["condition_count"],
+    )
 
     definitions, predicates, conditions, severity_bands = compile_rules(load_rules())
     ruleset_version = definitions[0]["ruleset_version"]
@@ -274,13 +291,17 @@ async def main() -> None:
     run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     baseline_end_year = date.today().year - 1
     metadata = MetadataStore()
-    member_root, rules_root, member_version, ruleset_version = ensure_references()
+    config_version = configuration_version()
+    member_root, rules_root, member_version, ruleset_version = ensure_references(
+        metadata, config_version
+    )
     metadata.start_run(
         run_id,
         ruleset_version,
         member_version,
         baseline_end_year,
-        configuration_version(),
+        config_version,
+        member_version,
     )
     counts = {
         "extracted": 0, "valid": 0, "invalid": 0, "published": 0,

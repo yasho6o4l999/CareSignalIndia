@@ -54,7 +54,8 @@ col3.metric("Quality warnings/failures", quality_failures)
 
 st.caption(
     f"Published run `{run_id}` · status `{latest_run['status']}` · "
-    f"ruleset `{latest_run['ruleset_version']}` · baseline through `{latest_run['baseline_end_year']}`"
+    f"ruleset `{latest_run['ruleset_version']}` · member snapshot `{latest_run['member_snapshot_id']}` · "
+    f"baseline through `{latest_run['baseline_end_year']}`"
 )
 
 st.subheader("Stakeholder alerts")
