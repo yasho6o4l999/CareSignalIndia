@@ -99,6 +99,21 @@ All executable DuckDB SQL is versioned under `sql/` rather than embedded in Pyth
 
 Python resolves trusted local paths, binds runtime filter values, and executes the named SQL artifacts.
 
+## Operational Metadata
+
+SQLite at `data/metadata/pipeline.db` is the authoritative operational state store. It records pipeline runs,
+source-city readiness, watermarks, invalid records, and published-dataset lineage. The dashboard selects the
+latest published run from SQLite; `latest_run.json` is no longer used.
+
+Synthetic members are cached by generator and city-set version under `data/reference/synthetic_members/`.
+Compiled regional rules are cached by deterministic ruleset hash under `data/reference/regional_rules/`.
+Forecast-driven marts remain immutable per-run snapshots.
+
+Marts are built under a staging directory. Source quality checks and final publication-contract checks must
+pass before the directory is atomically published. Failed runs remain recorded in SQLite and never replace
+the latest successful dashboard run. The local retention policy keeps the five newest forecast/raw and
+processed snapshots while preserving SQLite run history and reusable reference datasets.
+
 Synthetic member data contains no names, contact details, exact addresses, or real identifiers. Outreach priority is an operational demonstration, not a clinical risk score.
 
 ## Scheduling

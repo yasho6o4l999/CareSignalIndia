@@ -1,4 +1,5 @@
 import random
+import hashlib
 from datetime import date, timedelta
 
 from src.config import City
@@ -7,6 +8,13 @@ from src.config import City
 CONDITIONS = ["diabetes", "cardiovascular", "renal", "respiratory"]
 LANGUAGES = ["Hindi", "English", "Tamil", "Kannada", "Marathi", "Gujarati"]
 CHANNELS = ["app", "sms", "call"]
+GENERATOR_VERSION = "v1"
+
+
+def member_reference_version(cities: list[City], count: int = 5000) -> str:
+    city_ids = ",".join(sorted(city.city_id for city in cities))
+    digest = hashlib.sha256(f"{GENERATOR_VERSION}|{count}|{city_ids}".encode()).hexdigest()[:12]
+    return f"{GENERATOR_VERSION}-{digest}"
 
 
 def generate_members(cities: list[City], count: int = 5000, seed: int = 20260612) -> tuple[list[dict], list[dict]]:
@@ -27,9 +35,8 @@ def generate_members(cities: list[City], count: int = 5000, seed: int = 20260612
                 "preferred_channel": randomizer.choice(CHANNELS),
                 "outreach_consent": randomizer.random() < 0.9,
                 "last_contact_date": date.today() - timedelta(days=randomizer.randint(0, 60)),
-                "generator_version": "v1",
+                "generator_version": GENERATOR_VERSION,
             }
         )
         member_conditions.extend({"member_id": member_id, "condition": condition} for condition in conditions)
     return members, member_conditions
-

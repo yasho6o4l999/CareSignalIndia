@@ -1,10 +1,10 @@
-import json
 from pathlib import Path
 
 import duckdb
 import streamlit as st
 
 from src.config import load_cities
+from src.metadata import DATABASE_PATH, MetadataStore
 from src.sql import render_sql
 
 
@@ -13,12 +13,17 @@ st.set_page_config(page_title="CareSignal India", layout="wide")
 st.title("CareSignal India")
 st.caption("Year-round environmental care-operations intelligence using synthetic member data.")
 
-latest_path = ROOT / "data/processed/latest_run.json"
-if not latest_path.exists():
+if not DATABASE_PATH.exists():
     st.info("No processed data found. Run `python etl.py` first.")
     st.stop()
 
-run_id = json.loads(latest_path.read_text(encoding="utf-8"))["run_id"]
+metadata = MetadataStore()
+latest_run = metadata.latest_published_run()
+if latest_run is None:
+    st.info("No successfully published run found. Run `python etl.py` first.")
+    st.stop()
+
+run_id = latest_run["run_id"]
 run_root = ROOT / f"data/processed/run_id={run_id}"
 connection = duckdb.connect()
 
@@ -47,6 +52,11 @@ col1.metric("Eligible members", queue_count)
 col2.metric("Active stakeholder alerts", alerts.num_rows)
 col3.metric("Quality warnings/failures", quality_failures)
 
+st.caption(
+    f"Published run `{run_id}` · status `{latest_run['status']}` · "
+    f"ruleset `{latest_run['ruleset_version']}` · baseline through `{latest_run['baseline_end_year']}`"
+)
+
 st.subheader("Stakeholder alerts")
 st.dataframe(alerts, width="stretch")
 
@@ -72,4 +82,14 @@ baselines = connection.execute(
 ).fetch_arrow_table()
 st.dataframe(baselines, width="stretch")
 
+st.subheader("Pipeline health")
+recent_runs = metadata.query("queries/recent_runs.sql", (10,))
+source_readiness = metadata.query("queries/latest_source_readiness.sql", (run_id,))
+invalid_counts = metadata.query("queries/latest_invalid_counts.sql", (run_id,))
+st.dataframe([dict(row) for row in recent_runs], width="stretch")
+st.dataframe([dict(row) for row in source_readiness], width="stretch")
+if invalid_counts:
+    st.dataframe([dict(row) for row in invalid_counts], width="stretch")
+
 st.warning("Synthetic demonstration data only. This product does not provide medical advice or clinical risk scores.")
+metadata.close()

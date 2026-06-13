@@ -6,19 +6,27 @@ import duckdb
 from src.sql import render_sql
 
 
-def build_marts(root: Path, run_id: str) -> None:
+def build_marts(
+    root: Path,
+    run_id: str,
+    processed: Path | None = None,
+    members_root: Path | None = None,
+    rules_root: Path | None = None,
+) -> None:
     raw = root / "data/raw"
-    processed = root / "data/processed" / f"run_id={run_id}"
+    processed = processed or root / "data/processed" / f"run_id={run_id}"
     processed.mkdir(parents=True, exist_ok=True)
     connection = duckdb.connect()
 
     weather = raw / f"source=open_meteo_weather/run_id={run_id}" / "*.parquet"
     air = raw / f"source=open_meteo_air_quality/run_id={run_id}" / "*.parquet"
-    members = raw / f"source=synthetic_members/run_id={run_id}" / "members.parquet"
-    member_conditions = raw / f"source=synthetic_members/run_id={run_id}" / "member_conditions.parquet"
-    rules = raw / f"source=regional_rules/run_id={run_id}" / "rule_definitions.parquet"
-    rule_predicates = raw / f"source=regional_rules/run_id={run_id}" / "rule_predicates.parquet"
-    rule_conditions = raw / f"source=regional_rules/run_id={run_id}" / "rule_conditions.parquet"
+    members_root = members_root or raw / f"source=synthetic_members/run_id={run_id}"
+    rules_root = rules_root or raw / f"source=regional_rules/run_id={run_id}"
+    members = members_root / "members.parquet"
+    member_conditions = members_root / "member_conditions.parquet"
+    rules = rules_root / "rule_definitions.parquet"
+    rule_predicates = rules_root / "rule_predicates.parquet"
+    rule_conditions = rules_root / "rule_conditions.parquet"
     history = raw / f"source=nasa_power_daily/schema_version=v2/baseline_end_year={date.today().year - 1}" / "**/*.parquet"
     historical_baselines = processed / "historical_baselines.parquet"
     city_conditions = processed / "city_conditions.parquet"

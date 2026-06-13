@@ -19,6 +19,7 @@ EXPECTED_SQL_FILES = {
     "marts/build_stakeholder_alerts.sql",
     "quality/profile_dataset.sql",
     "quality/profile_historical_dataset.sql",
+    "quality/publication_contract.sql",
 }
 
 
