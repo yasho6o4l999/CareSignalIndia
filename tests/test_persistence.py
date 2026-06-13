@@ -3,6 +3,7 @@ from datetime import datetime, timedelta, timezone
 import duckdb
 
 from src.pipeline.marts import build_marts
+from src.sql import render_sql
 from src.storage import write_rows
 
 
@@ -69,5 +70,6 @@ def test_missing_hour_breaks_persistence_window(tmp_path) -> None:
     build_marts(tmp_path, run_id)
 
     active_triggers = tmp_path / f"data/processed/run_id={run_id}/active_triggers.parquet"
-    assert duckdb.connect().execute(f"SELECT count(*) FROM read_parquet('{active_triggers}')").fetchone()[0] == 0
-
+    assert duckdb.connect().execute(
+        render_sql("common/count_rows.sql", dataset_path=active_triggers)
+    ).fetchone()[0] == 0

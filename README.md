@@ -54,6 +54,17 @@ rule-definition and rule-condition Parquet datasets with a deterministic ruleset
 the applicable city, calendar month, metric, threshold, and operator. A trigger is published only after the
 configured number of consecutive hourly breaches; missing hours and non-breaching values break the streak.
 
+## SQL Ownership
+
+All executable DuckDB SQL is versioned under `sql/` rather than embedded in Python:
+
+- `sql/marts/`: raw-to-analytical transformations and published marts
+- `sql/quality/`: source profiling and data-quality queries
+- `sql/dashboard/`: Streamlit read queries
+- `sql/common/`: reusable utility queries
+
+Python resolves trusted local paths, binds runtime filter values, and executes the named SQL artifacts.
+
 Synthetic member data contains no names, contact details, exact addresses, or real identifiers. Outreach priority is an operational demonstration, not a clinical risk score.
 
 ## Scheduling

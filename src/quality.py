@@ -3,6 +3,7 @@ from datetime import datetime, timedelta, timezone
 import duckdb
 
 from src.models import QualityResult
+from src.sql import render_sql
 
 
 def run_quality_checks(run_id: str, raw_root: str) -> list[QualityResult]:
@@ -13,10 +14,7 @@ def run_quality_checks(run_id: str, raw_root: str) -> list[QualityResult]:
     checks: list[QualityResult] = []
     for dataset, path in [("weather", weather), ("air_quality", air)]:
         count, unique_count, latest = connection.execute(
-            f"""
-            SELECT count(*), count(DISTINCT city_id || '|' || CAST(observed_at AS VARCHAR)), max(observed_at)
-            FROM read_parquet('{path}')
-            """
+            render_sql("quality/profile_dataset.sql", dataset_path=path)
         ).fetchone()
         checks.append(
             QualityResult(

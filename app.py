@@ -4,6 +4,8 @@ from pathlib import Path
 import duckdb
 import streamlit as st
 
+from src.sql import render_sql
+
 
 ROOT = Path(__file__).resolve().parent
 st.set_page_config(page_title="CareSignal India", layout="wide")
@@ -20,17 +22,23 @@ run_root = ROOT / f"data/processed/run_id={run_id}"
 connection = duckdb.connect()
 
 alerts = connection.execute(
-    f"""
-    SELECT * FROM read_parquet('{run_root / "stakeholder_alerts.parquet"}')
-    ORDER BY eligible_members DESC
-    """
+    render_sql(
+        "dashboard/stakeholder_alerts.sql",
+        stakeholder_alerts_path=run_root / "stakeholder_alerts.parquet",
+    )
 ).fetch_arrow_table()
 
 queue_count = connection.execute(
-    f"SELECT count(DISTINCT member_id) FROM read_parquet('{run_root / 'outreach_queue.parquet'}')"
+    render_sql(
+        "dashboard/outreach_member_count.sql",
+        outreach_queue_path=run_root / "outreach_queue.parquet",
+    )
 ).fetchone()[0]
 quality_failures = connection.execute(
-    f"SELECT count(*) FROM read_parquet('{run_root / 'quality_results.parquet'}') WHERE status <> 'pass'"
+    render_sql(
+        "dashboard/quality_issue_count.sql",
+        quality_results_path=run_root / "quality_results.parquet",
+    )
 ).fetchone()[0]
 
 col1, col2, col3 = st.columns(3)
@@ -43,19 +51,13 @@ st.dataframe(alerts, width="stretch")
 
 st.subheader("Member outreach queue")
 city = st.selectbox("City", ["All", "delhi", "mumbai", "bengaluru", "chennai", "ahmedabad"])
-predicate = "" if city == "All" else "WHERE city_id = ?"
-parameters = [] if city == "All" else [city]
+selected_city = None if city == "All" else city
 queue = connection.execute(
-    f"""
-    SELECT member_id, city_id, matched_conditions, rule_id, severity, priority_score,
-           preferred_channel, preferred_language, window_start, window_end,
-           trigger_explanation
-    FROM read_parquet('{run_root / "outreach_queue.parquet"}')
-    {predicate}
-    ORDER BY priority_score DESC
-    LIMIT 500
-    """,
-    parameters,
+    render_sql(
+        "dashboard/outreach_queue.sql",
+        outreach_queue_path=run_root / "outreach_queue.parquet",
+    ),
+    [selected_city, selected_city],
 ).fetch_arrow_table()
 st.dataframe(queue, width="stretch")
 
