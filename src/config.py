@@ -44,6 +44,10 @@ class PublicationPolicy(BaseModel):
         return value
 
 
+class IncrementalPolicy(BaseModel):
+    forecast_correction_lookback_hours: int = Field(ge=0, le=168)
+
+
 class RulePredicate(BaseModel):
     metric: Metric
     operator: Literal["greater_than_or_equal", "less_than_or_equal"]
@@ -94,6 +98,10 @@ def load_publication_policy() -> PublicationPolicy:
     if policy.minimum_complete_cities > len(load_cities()):
         raise ValueError("minimum_complete_cities cannot exceed configured cities")
     return policy
+
+
+def load_incremental_policy() -> IncrementalPolicy:
+    return IncrementalPolicy.model_validate(_load_yaml(ROOT / "config/incremental_policy.yml"))
 
 
 def load_rules() -> list[Rule]:

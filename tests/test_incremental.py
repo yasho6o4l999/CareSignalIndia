@@ -1,0 +1,85 @@
+from datetime import datetime, timedelta, timezone
+
+import pyarrow.parquet as pq
+
+from src.incremental import merge_forecast_snapshot
+from src.models import WeatherRecord
+from src.storage import write_models
+
+
+def weather_record(observed_at: datetime, temperature: float, extracted_at: datetime) -> WeatherRecord:
+    return WeatherRecord(
+        city_id="delhi",
+        observed_at=observed_at,
+        apparent_temperature=temperature + 1,
+        temperature_2m=temperature,
+        precipitation=0,
+        relative_humidity=50,
+        wind_speed=5,
+        extracted_at=extracted_at,
+    )
+
+
+def test_incremental_merge_classifies_overlap_and_is_idempotent(tmp_path) -> None:
+    start = datetime(2099, 1, 1, tzinfo=timezone.utc)
+    first_extraction = start - timedelta(hours=1)
+    second_extraction = start
+    previous_records = [
+        weather_record(start + timedelta(hours=offset), 30 + offset, first_extraction)
+        for offset in range(3)
+    ]
+    incoming_records = [
+        weather_record(start + timedelta(hours=1), 31, second_extraction),
+        weather_record(start + timedelta(hours=2), 40, second_extraction),
+        weather_record(start + timedelta(hours=3), 33, second_extraction),
+    ]
+    previous_path = tmp_path / "previous.parquet"
+    output_path = tmp_path / "output.parquet"
+    replay_path = tmp_path / "replay.parquet"
+    write_models(previous_path, previous_records)
+
+    metrics = merge_forecast_snapshot(
+        "open_meteo_weather",
+        incoming_records,
+        previous_path,
+        output_path,
+        start - timedelta(hours=1),
+    )
+    assert (metrics.inserted, metrics.updated, metrics.unchanged) == (1, 1, 1)
+
+    output = sorted(pq.read_table(output_path).to_pylist(), key=lambda row: row["observed_at"])
+    assert len(output) == 4
+    assert output[1]["extracted_at"] == first_extraction
+    assert output[2]["temperature_2m"] == 40
+
+    replay_metrics = merge_forecast_snapshot(
+        "open_meteo_weather",
+        incoming_records,
+        output_path,
+        replay_path,
+        start - timedelta(hours=1),
+    )
+    assert (replay_metrics.inserted, replay_metrics.updated, replay_metrics.unchanged) == (0, 0, 3)
+    replay = sorted(pq.read_table(replay_path).to_pylist(), key=lambda row: row["observed_at"])
+    assert replay == output
+
+
+def test_initial_snapshot_rejects_duplicate_natural_keys(tmp_path) -> None:
+    observed_at = datetime(2099, 1, 1, tzinfo=timezone.utc)
+    records = [
+        weather_record(observed_at, 30, observed_at - timedelta(hours=1)),
+        weather_record(observed_at, 35, observed_at),
+    ]
+    output_path = tmp_path / "deduplicated.parquet"
+
+    metrics = merge_forecast_snapshot(
+        "open_meteo_weather",
+        records,
+        None,
+        output_path,
+        observed_at - timedelta(hours=24),
+    )
+
+    output = pq.read_table(output_path).to_pylist()
+    assert (metrics.inserted, metrics.rejected) == (1, 1)
+    assert output[0]["temperature_2m"] == 35

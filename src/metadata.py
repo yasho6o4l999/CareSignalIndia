@@ -24,7 +24,30 @@ class MetadataStore:
         path.parent.mkdir(parents=True, exist_ok=True)
         self.connection = sqlite3.connect(path)
         self.connection.row_factory = sqlite3.Row
-        self.connection.executescript(read_sql("migrations/001_initial_schema.sql"))
+        self._apply_migrations()
+
+    def _apply_migrations(self) -> None:
+        self.connection.executescript(read_sql("migrations/000_schema_migrations.sql"))
+        applied = {
+            row["version"]
+            for row in self.connection.execute(read_sql("queries/applied_migrations.sql")).fetchall()
+        }
+        if "000_schema_migrations.sql" not in applied:
+            with self.connection:
+                self.connection.execute(
+                    read_sql("mutations/record_migration.sql"),
+                    ("000_schema_migrations.sql", utc_now()),
+                )
+            applied.add("000_schema_migrations.sql")
+        for path in sorted((SQLITE_ROOT / "migrations").glob("*.sql")):
+            if path.name in applied:
+                continue
+            with self.connection:
+                self.connection.executescript(path.read_text(encoding="utf-8"))
+                self.connection.execute(
+                    read_sql("mutations/record_migration.sql"),
+                    (path.name, utc_now()),
+                )
 
     def close(self) -> None:
         self.connection.close()
@@ -41,15 +64,34 @@ class MetadataStore:
         with self.connection:
             self.connection.execute(
                 read_sql("mutations/complete_run.sql"),
-                (now, status, now, status, counts["extracted"], counts["valid"], counts["invalid"], counts["published"], error_message, run_id),
+                (
+                    now, status, now, status, counts["extracted"], counts["valid"], counts["invalid"],
+                    counts["published"], counts.get("inserted", 0), counts.get("updated", 0),
+                    counts.get("unchanged", 0), counts.get("rejected", counts["invalid"]),
+                    error_message, run_id,
+                ),
             )
 
-    def record_readiness(self, run_id: str, source: str, city_id: str, records: int, latest: str | None) -> None:
+    def record_readiness(
+        self,
+        run_id: str,
+        source: str,
+        city_id: str,
+        records: int,
+        latest: str | None,
+        inserted: int = 0,
+        updated: int = 0,
+        unchanged: int = 0,
+        rejected: int = 0,
+    ) -> None:
         now = utc_now()
         with self.connection:
             self.connection.execute(
                 read_sql("mutations/record_readiness.sql"),
-                (run_id, source, city_id, now, now, records, records, latest),
+                (
+                    run_id, source, city_id, now, now, records, records - rejected, rejected,
+                    inserted, updated, unchanged, rejected, latest,
+                ),
             )
 
     def record_failure(self, run_id: str, source: str, city_id: str, message: str) -> None:
@@ -79,6 +121,13 @@ class MetadataStore:
                 read_sql("mutations/upsert_watermark.sql"),
                 (source, city_id, watermark_type, value, run_id, utc_now()),
             )
+
+    def watermark(self, source: str, city_id: str, watermark_type: str) -> str | None:
+        row = self.connection.execute(
+            read_sql("queries/get_watermark.sql"),
+            (source, city_id, watermark_type),
+        ).fetchone()
+        return row["watermark_value"] if row else None
 
     def latest_published_run(self) -> sqlite3.Row | None:
         return self.connection.execute(read_sql("queries/latest_published_run.sql")).fetchone()

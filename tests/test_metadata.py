@@ -17,6 +17,7 @@ def test_metadata_run_lifecycle_and_latest_publication(tmp_path) -> None:
     assert latest["run_id"] == "run-1"
     assert latest["records_published"] == 3
     assert store.query("queries/latest_source_readiness.sql", ("run-1",))[0]["status"] == "success"
+    assert store.watermark("weather", "delhi", "latest_successful_run") == "run-1"
     store.close()
 
 

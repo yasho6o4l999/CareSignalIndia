@@ -119,6 +119,13 @@ air-quality, and historical-baseline data are available. Seven complete cities p
 five complete cities produces `partial_success`; fewer than five prevents publication. Isolated source-city
 failures are quarantined, shown in the dashboard, and do not advance their previous successful watermarks.
 
+Forecast snapshots are incrementally merged using each source-city `latest_successful_run` watermark. Because
+Open-Meteo exposes revision-prone rolling forecasts rather than a change-data feed, every run retrieves the
+current forecast window, compares it with the previous successful snapshot in DuckDB, and classifies natural
+keys as inserted, updated, or unchanged. Unchanged records retain their original extraction metadata,
+corrections replace prior values, and records older than the configurable correction lookback in
+`config/incremental_policy.yml` are pruned. SQLite stores both source-city and run-level change metrics.
+
 Synthetic member data contains no names, contact details, exact addresses, or real identifiers. Outreach priority is an operational demonstration, not a clinical risk score.
 
 ## Scheduling

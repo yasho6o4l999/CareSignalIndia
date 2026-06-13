@@ -86,6 +86,9 @@ async def test_forecast_extraction_quarantines_one_city_failure_and_continues(tm
         def quarantine(self, *args):
             self.quarantined.append(args)
 
+        def watermark(self, *args):
+            return None
+
     metadata = FakeMetadata()
     monkeypatch.setattr(etl, "ROOT", tmp_path)
     monkeypatch.setattr(etl, "load_cities", lambda: cities)

@@ -3,7 +3,7 @@ import logging
 import os
 import shutil
 from dataclasses import dataclass, field
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 import pyarrow.parquet as pq
@@ -11,7 +11,8 @@ import duckdb
 
 from src.clients.nasa_power import NasaPowerClient
 from src.clients.open_meteo import OpenMeteoClient
-from src.config import ROOT, load_cities, load_publication_policy, load_rules
+from src.config import ROOT, load_cities, load_incremental_policy, load_publication_policy, load_rules
+from src.incremental import ChangeMetrics, merge_forecast_snapshot
 from src.metadata import MetadataStore
 from src.pipeline.marts import build_marts
 from src.quality import run_quality_checks
@@ -31,15 +32,34 @@ RETENTION_RUNS = 5
 class ExtractionResult:
     records: int = 0
     failures: int = 0
+    inserted: int = 0
+    updated: int = 0
+    unchanged: int = 0
+    rejected: int = 0
     successful_cities_by_source: dict[str, set[str]] = field(default_factory=dict)
 
-    def record_success(self, source: str, city_id: str, records: int) -> None:
+    def record_success(
+        self,
+        source: str,
+        city_id: str,
+        records: int,
+        metrics: ChangeMetrics | None = None,
+    ) -> None:
         self.records += records
+        if metrics:
+            self.inserted += metrics.inserted
+            self.updated += metrics.updated
+            self.unchanged += metrics.unchanged
+            self.rejected += metrics.rejected
         self.successful_cities_by_source.setdefault(source, set()).add(city_id)
 
     def merge(self, other: "ExtractionResult") -> None:
         self.records += other.records
         self.failures += other.failures
+        self.inserted += other.inserted
+        self.updated += other.updated
+        self.unchanged += other.unchanged
+        self.rejected += other.rejected
         for source, cities in other.successful_cities_by_source.items():
             self.successful_cities_by_source.setdefault(source, set()).update(cities)
 
@@ -93,6 +113,9 @@ def record_source_failure(
 async def extract_forecasts(run_id: str, metadata: MetadataStore) -> ExtractionResult:
     cities = load_cities()
     extraction = ExtractionResult()
+    cutoff = datetime.now(timezone.utc) - timedelta(
+        hours=load_incremental_policy().forecast_correction_lookback_hours
+    )
     async with OpenMeteoClient() as client:
         weather_results, air_results = await asyncio.gather(
             asyncio.gather(*(client.fetch_weather(city) for city in cities), return_exceptions=True),
@@ -103,10 +126,27 @@ async def extract_forecasts(run_id: str, metadata: MetadataStore) -> ExtractionR
             if isinstance(result, Exception):
                 record_source_failure(metadata, run_id, source, city.city_id, result)
                 extraction.failures += 1
+                extraction.rejected += 1
                 continue
-            count = write_models(ROOT / f"data/raw/source={source}/run_id={run_id}/{city.city_id}.parquet", result)
-            metadata.record_readiness(run_id, source, city.city_id, count, latest_timestamp(result))
-            extraction.record_success(source, city.city_id, count)
+            output_path = ROOT / f"data/raw/source={source}/run_id={run_id}/{city.city_id}.parquet"
+            previous_run = metadata.watermark(source, city.city_id, "latest_successful_run")
+            previous_path = (
+                ROOT / f"data/raw/source={source}/run_id={previous_run}/{city.city_id}.parquet"
+                if previous_run else None
+            )
+            metrics = merge_forecast_snapshot(source, result, previous_path, output_path, cutoff)
+            metadata.record_readiness(
+                run_id,
+                source,
+                city.city_id,
+                len(result),
+                latest_timestamp(result),
+                metrics.inserted,
+                metrics.updated,
+                metrics.unchanged,
+                metrics.rejected,
+            )
+            extraction.record_success(source, city.city_id, len(result), metrics)
     return extraction
 
 
@@ -132,14 +172,27 @@ async def ensure_history(run_id: str, metadata: MetadataStore, baseline_end_year
         if isinstance(result, Exception):
             record_source_failure(metadata, run_id, "nasa_power_daily", city.city_id, result)
             extraction.failures += 1
+            extraction.rejected += 1
             continue
         by_year: dict[int, list] = {}
         for record in result:
             by_year.setdefault(record.observed_date.year, []).append(record)
         for year, records in by_year.items():
             extraction.records += write_models(history_root / f"city_id={city.city_id}/year={year}/data.parquet", records)
-        metadata.record_readiness(run_id, "nasa_power_daily", city.city_id, len(result), latest_timestamp(result))
-        extraction.successful_cities_by_source.setdefault("nasa_power_daily", set()).add(city.city_id)
+        metadata.record_readiness(
+            run_id,
+            "nasa_power_daily",
+            city.city_id,
+            len(result),
+            latest_timestamp(result),
+            inserted=len(result),
+        )
+        extraction.record_success(
+            "nasa_power_daily",
+            city.city_id,
+            0,
+            ChangeMetrics(inserted=len(result), updated=0, unchanged=0),
+        )
     return extraction
 
 
@@ -197,15 +250,23 @@ async def main() -> None:
     metadata = MetadataStore()
     member_root, rules_root, member_version, ruleset_version = ensure_references()
     metadata.start_run(run_id, ruleset_version, member_version, baseline_end_year)
-    counts = {"extracted": 0, "valid": 0, "invalid": 0, "published": 0}
+    counts = {
+        "extracted": 0, "valid": 0, "invalid": 0, "published": 0,
+        "inserted": 0, "updated": 0, "unchanged": 0, "rejected": 0,
+    }
     staging = ROOT / f"data/processed/.staging-{run_id}"
     LOGGER.info("Starting run_id=%s", run_id)
     try:
         extraction = await extract_forecasts(run_id, metadata)
         extraction.merge(await ensure_history(run_id, metadata, baseline_end_year))
         counts["extracted"] = extraction.records
-        counts["invalid"] = extraction.failures
-        counts["valid"] = counts["extracted"]
+        counts["invalid"] = extraction.rejected
+        duplicate_rejections = max(0, extraction.rejected - extraction.failures)
+        counts["valid"] = counts["extracted"] - duplicate_rejections
+        counts["inserted"] = extraction.inserted
+        counts["updated"] = extraction.updated
+        counts["unchanged"] = extraction.unchanged
+        counts["rejected"] = extraction.rejected
         cities = load_cities()
         readiness = evaluate_readiness(
             {city.city_id for city in cities},
