@@ -19,6 +19,10 @@ heat, coastal high-wind disruption, winter cold-plus-pollution exposure, and Jai
 - Machine-readable freshness, uniqueness, and non-empty quality checks
 - Configuration-driven regional rules with consecutive-hour persistence windows
 
+See [`docs/architecture.md`](docs/architecture.md) for the current high-level and low-level architecture
+diagrams, component contracts, review sequence, and explicit boundary between implemented capabilities and
+future operational work.
+
 No pandas dependency is used. Generated data and credentials are excluded from Git.
 
 ## Run Locally
