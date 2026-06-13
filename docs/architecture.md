@@ -4,154 +4,124 @@ This document describes the architecture implemented in the repository today. Sc
 external monitoring, notifications, and dashboard redesign are intentionally shown as future work rather than
 current capabilities.
 
-## High-Level Architecture
+## Architecture At A Glance
+
+Read this diagram left to right. It answers one question: **how does public environmental data become an
+actionable care-operations queue?**
 
 ```mermaid
 flowchart LR
-    subgraph Sources["Public Environmental Sources"]
-        Weather["Open-Meteo Weather Forecast"]
-        Air["Open-Meteo Air Quality Forecast"]
-        History["NASA POWER Daily History"]
-    end
+    A["1. Public environmental APIs<br/>Weather, air quality, history"]
+    B["2. Validate and store<br/>Async extraction + Parquet"]
+    C["3. Understand local risk<br/>Baselines + regional rules"]
+    D["4. Identify affected members<br/>Synthetic chronic-care cohort"]
+    E["5. Publish care actions<br/>Alerts + outreach queue"]
+    F["6. Support decisions<br/>Streamlit dashboard"]
 
-    subgraph Control["Configuration and Reference Plane"]
-        Cities["City Catalog"]
-        Policies["Incremental and Publication Policies"]
-        RuleConfig["Regional Rule Configuration"]
-        RuleReference["Versioned Compiled Rules"]
-        MemberReference["Versioned Synthetic Members"]
-    end
+    A --> B --> C --> D --> E --> F
 
-    subgraph Pipeline["Local Data Engineering Pipeline"]
-        Extract["Async Extraction and Schema Validation"]
-        Incremental["Watermark-Driven Incremental Merge"]
-        Quality["Source Quality and Readiness Gates"]
-        Decisioning["DuckDB Baselines, Rules, and Persistence Evaluation"]
-        Publish["Publication Contract and Atomic Publish"]
-    end
-
-    subgraph Storage["Local Persistence"]
-        Raw["Immutable Run-Partitioned Parquet Snapshots"]
-        Marts["Published Analytical Parquet Marts"]
-        SQLite["SQLite Operational Metadata"]
-        Quarantine["Invalid Record Quarantine"]
-    end
-
-    subgraph Product["Care Operations Product"]
-        Dashboard["Streamlit Dashboard"]
-        Stakeholders["Care Operations Stakeholders"]
-    end
-
-    Weather --> Extract
-    Air --> Extract
-    History --> Extract
-    Cities --> Extract
-    Policies --> Incremental
-    Policies --> Quality
-    RuleConfig --> RuleReference
-    Cities --> MemberReference
-    RuleReference --> Decisioning
-    MemberReference --> Decisioning
-    Extract --> Incremental
-    Incremental --> Raw
-    Raw --> Quality
-    Quality --> Decisioning
-    Decisioning --> Publish
-    Publish --> Marts
-    Extract --> Quarantine
-    Incremental <--> SQLite
-    Quality --> SQLite
-    Publish --> SQLite
-    Marts --> Dashboard
-    SQLite --> Dashboard
-    Dashboard --> Stakeholders
-
-    Future["Future: Scheduling, Recovery, Monitoring, and Notifications"]
-    Future -.-> Pipeline
+    Config["Configuration<br/>Cities, policies, regional scenarios"] -.-> B
+    Config -.-> C
+    Operations["SQLite operational state<br/>Runs, readiness, watermarks, lineage"] -.-> B
+    Operations -.-> E
 ```
 
-### High-Level Responsibilities
+### What Each Step Means
 
-| Area | Current responsibility |
+| Step | What happens |
 |---|---|
-| Public sources | Provide seven-day weather and air-quality forecasts plus five complete years of historical weather |
-| Configuration and reference plane | Defines supported cities, regional scenarios, publication thresholds, correction lookback, compiled rules, and synthetic members |
-| Pipeline | Extracts concurrently, validates schemas, merges rolling snapshots, evaluates readiness, builds analytical marts, and publishes atomically |
-| Parquet | Stores memory-efficient source snapshots, reusable references, historical partitions, and immutable published marts |
-| SQLite | Drives pipeline state through run lifecycle, source readiness, watermarks, invalid records, incremental metrics, and publication lineage |
-| Streamlit | Reads only the latest successfully published run and exposes care-operations outputs plus pipeline-health information |
+| 1. Public data | Open-Meteo provides forecasts; NASA POWER provides five complete historical years |
+| 2. Validate and store | Pydantic validates records; DuckDB merges forecast corrections; Parquet stores run snapshots |
+| 3. Understand risk | Historical percentiles and region-specific rules identify sustained environmental events |
+| 4. Identify members | Triggered cities and relevant chronic conditions are joined to consented synthetic members |
+| 5. Publish actions | Quality-approved alerts and outreach queues are atomically published |
+| 6. Support decisions | Streamlit shows care actions and pipeline health from the latest published run |
 
-## Low-Level Architecture
+## Data Processing Architecture
+
+Read this diagram top to bottom. It shows the datasets created during a successful pipeline run. Operational
+metadata and failure handling are deliberately excluded here and shown in the next diagram.
 
 ```mermaid
 flowchart TD
-    Start["Manual Entry Point: python etl.py"] --> LoadConfig["Load cities.yml, regional_rules.yml, publication_policy.yml, incremental_policy.yml"]
-    LoadConfig --> MetadataInit["MetadataStore initializes SQLite migrations"]
-    MetadataInit --> StartRun["Insert pipeline_runs status=running"]
+    subgraph Inputs["Inputs"]
+        Forecasts["Weather + Air-Quality Forecasts"]
+        History["Historical Weather"]
+        Rules["Regional Rules"]
+        Members["Synthetic Members"]
+    end
 
-    LoadConfig --> EnsureReferences["Ensure versioned reference datasets"]
-    EnsureReferences --> CompileRules["Compile regional rules and ruleset hash"]
-    EnsureReferences --> GenerateMembers["Generate deterministic synthetic members"]
-    CompileRules --> RuleParquet["data/reference/regional_rules"]
-    GenerateMembers --> MemberParquet["data/reference/synthetic_members"]
+    Forecasts --> RawForecast["Validated Incremental Forecast Snapshots"]
+    History --> RawHistory["Cached Historical Partitions"]
 
-    StartRun --> ForecastExtract["OpenMeteoClient async weather and air-quality requests per city"]
-    StartRun --> HistoryCheck["Check NASA historical cache per city"]
-    HistoryCheck -->|Missing cache| HistoryExtract["NasaPowerClient async historical requests"]
-    HistoryCheck -->|Cache available| HistoryReady["Record cached source readiness"]
-    HistoryExtract --> HistoryParquet["data/raw/source=nasa_power_daily partitioned by baseline year, city, and year"]
+    RawHistory --> Baselines["Historical Baselines<br/>City + month percentiles"]
+    RawForecast --> Conditions["City Conditions<br/>Joined weather + air quality"]
 
-    ForecastExtract --> Pydantic["Pydantic type, range, and timezone validation"]
-    Pydantic -->|Source-city failure| Quarantine["SQLite invalid_records and failed source_readiness"]
-    Pydantic -->|Valid records| WatermarkRead["Read latest_successful_run watermark per source and city"]
-    WatermarkRead --> PreviousSnapshot["Locate previous successful Parquet snapshot"]
-    PreviousSnapshot --> IncrementalSQL["DuckDB deduplicate, compare, and merge with correction lookback"]
-    IncrementalSQL --> ChangeMetrics["Inserted, updated, unchanged, and rejected metrics"]
-    IncrementalSQL --> RawSnapshot["data/raw/source=open_meteo_*/run_id/city.parquet"]
-    ChangeMetrics --> SourceReadiness["SQLite source_readiness"]
+    Baselines --> Triggers["Active Triggers<br/>Rule breach + persistence"]
+    Conditions --> Triggers
+    Rules --> Triggers
 
-    HistoryReady --> ReadinessDecision["Evaluate required-source completeness by city"]
-    HistoryParquet --> ReadinessDecision
-    SourceReadiness --> ReadinessDecision
-    ReadinessDecision -->|Fewer than minimum complete cities| FailedRun["Mark failed; do not publish"]
-    ReadinessDecision -->|Minimum met| SourceQuality["DuckDB source quality checks"]
-    SourceQuality -->|Fatal quality failure| FailedRun
-    SourceQuality -->|Pass or warning| PublicationCities["Write explicit publication_cities.parquet"]
+    Triggers --> Outreach["Outreach Queue<br/>Consented relevant members"]
+    Members --> Outreach
+    Outreach --> Alerts["Stakeholder Alerts<br/>Aggregated care workload"]
 
-    PublicationCities --> Staging["data/processed/.staging-run_id"]
-    RuleParquet --> Marts
-    MemberParquet --> Marts
-    RawSnapshot --> Marts["DuckDB SQL Mart Build"]
-    HistoryParquet --> Marts
-    Marts --> Baselines["historical_baselines.parquet"]
-    Marts --> Conditions["city_conditions.parquet"]
-    Marts --> Triggers["active_triggers.parquet"]
-    Marts --> Outreach["outreach_queue.parquet"]
-    Marts --> Alerts["stakeholder_alerts.parquet"]
-    SourceQuality --> QualityResults["quality_results.parquet"]
-    Baselines --> Staging
-    Conditions --> Staging
-    Triggers --> Staging
-    Outreach --> Staging
-    Alerts --> Staging
-    QualityResults --> Staging
-
-    Staging --> Contract["Publication contract: required datasets, consent, uniqueness, persistence"]
-    Contract -->|Failure| FailedRun
-    Contract -->|Pass| AtomicPublish["Atomic directory rename to data/processed/run_id"]
-    AtomicPublish --> Lineage["Record published_datasets lineage"]
-    AtomicPublish --> AdvanceWatermarks["Advance only successful source-city watermarks"]
-    AdvanceWatermarks --> CompleteRun["Mark success or partial_success"]
-    CompleteRun --> Retention["Keep five newest forecast and processed snapshots"]
-
-    SQLiteDB[("data/metadata/pipeline.db")] --> DashboardRead["app.py selects latest published run"]
-    CompleteRun --> SQLiteDB
-    Quarantine --> SQLiteDB
-    Lineage --> SQLiteDB
-    AtomicPublish --> PublishedMarts[("Published Parquet Marts")]
-    PublishedMarts --> DashboardRead
-    DashboardRead --> Dashboard["Streamlit care-operations and pipeline-health dashboard"]
+    Baselines --> Published["Atomic Published Run"]
+    Conditions --> Published
+    Triggers --> Published
+    Outreach --> Published
+    Alerts --> Published
+    Published --> Dashboard["Streamlit Dashboard"]
 ```
+
+### Published Data Products
+
+| Data product | Purpose |
+|---|---|
+| `historical_baselines.parquet` | Defines what is locally unusual for each city and month |
+| `city_conditions.parquet` | Creates one combined environmental view per city and forecast hour |
+| `active_triggers.parquet` | Contains rule breaches that satisfy required persistence windows |
+| `outreach_queue.parquet` | Identifies consented members relevant to active triggers |
+| `stakeholder_alerts.parquet` | Summarizes care-operations workload by alert |
+
+## Pipeline Control Architecture
+
+This diagram explains whether a run is allowed to publish and how SQLite drives incremental behavior.
+
+```mermaid
+flowchart TD
+    Start["Start ETL Run"] --> Running["SQLite: status = running"]
+    Running --> Extract["Extract each source and city"]
+
+    Extract -->|Valid forecast| Watermark["Read previous successful-run watermark"]
+    Watermark --> Merge["Merge and classify<br/>inserted, updated, unchanged, rejected"]
+    Merge --> Readiness["Record source-city readiness"]
+
+    Extract -->|Failure| Quarantine["Record failure and quarantine"]
+    Quarantine --> Readiness
+    History["Cached or fetched historical data"] --> Readiness
+
+    Readiness --> Decision{"Enough complete cities?"}
+    Decision -->|No| Failed["status = failed<br/>Do not publish"]
+    Decision -->|Yes| Quality["Source quality checks"]
+    Quality -->|Fatal failure| Failed
+    Quality -->|Pass| Build["Build marts in staging directory"]
+    Build --> Contract{"Publication contract passes?"}
+    Contract -->|No| Failed
+    Contract -->|Yes| Publish["Atomic publish"]
+    Publish --> Watermarks["Advance successful source-city watermarks"]
+    Watermarks --> Complete["status = success or partial_success"]
+    Complete --> Latest["Dashboard reads latest published run"]
+```
+
+### Storage Responsibilities
+
+| Storage | Stores | Why it is used |
+|---|---|---|
+| Parquet `data/raw/` | Forecast snapshots and historical source data | Columnar, compressed, and queryable directly by DuckDB |
+| Parquet `data/reference/` | Versioned compiled rules and synthetic members | Reusable across runs; avoids unnecessary regeneration |
+| Parquet `data/processed/` | Immutable published analytical runs | Dashboard never reads partially built output |
+| SQLite `data/metadata/pipeline.db` | Runs, readiness, watermarks, rejects, migrations, and lineage | Small transactional driver state for incremental and publication decisions |
+| Quarantine in SQLite | Invalid source-city events and payload context | Makes failures visible without storing generated data in Git |
 
 ## Current Data Contracts
 
