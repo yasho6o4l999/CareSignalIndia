@@ -1,3 +1,4 @@
+from datetime import date
 from pathlib import Path
 
 import duckdb
@@ -17,11 +18,20 @@ def build_marts(root: Path, run_id: str) -> None:
     member_conditions = raw / f"source=synthetic_members/run_id={run_id}" / "member_conditions.parquet"
     rules = raw / f"source=regional_rules/run_id={run_id}" / "rule_definitions.parquet"
     rule_conditions = raw / f"source=regional_rules/run_id={run_id}" / "rule_conditions.parquet"
+    history = raw / f"source=nasa_power_daily/baseline_end_year={date.today().year - 1}" / "**/*.parquet"
+    historical_baselines = processed / "historical_baselines.parquet"
     city_conditions = processed / "city_conditions.parquet"
     active_triggers = processed / "active_triggers.parquet"
     outreach_queue = processed / "outreach_queue.parquet"
     stakeholder_alerts = processed / "stakeholder_alerts.parquet"
 
+    connection.execute(
+        render_sql(
+            "marts/build_historical_baselines.sql",
+            history_path=history,
+            output_path=historical_baselines,
+        )
+    )
     connection.execute(
         render_sql(
             "marts/build_city_conditions.sql",
@@ -35,6 +45,7 @@ def build_marts(root: Path, run_id: str) -> None:
             "marts/build_active_triggers.sql",
             city_conditions_path=city_conditions,
             rules_path=rules,
+            historical_baselines_path=historical_baselines,
             output_path=active_triggers,
         )
     )

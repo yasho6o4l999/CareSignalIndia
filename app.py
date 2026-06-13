@@ -61,4 +61,14 @@ queue = connection.execute(
 ).fetch_arrow_table()
 st.dataframe(queue, width="stretch")
 
+st.subheader("City-specific historical baselines")
+baselines = connection.execute(
+    render_sql(
+        "dashboard/historical_baselines.sql",
+        historical_baselines_path=run_root / "historical_baselines.parquet",
+    ),
+    [selected_city, selected_city],
+).fetch_arrow_table()
+st.dataframe(baselines, width="stretch")
+
 st.warning("Synthetic demonstration data only. This product does not provide medical advice or clinical risk scores.")

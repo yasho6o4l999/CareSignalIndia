@@ -1,0 +1,93 @@
+from datetime import datetime, timedelta, timezone
+
+import pyarrow.parquet as pq
+
+from src.pipeline.marts import build_marts
+from src.storage import write_rows
+
+
+def test_baseline_rule_uses_city_month_p95_as_effective_threshold(tmp_path) -> None:
+    run_id = "baseline-test"
+    start = datetime(2026, 6, 15, 6, tzinfo=timezone.utc)
+    weather = [
+        {
+            "city_id": "bengaluru",
+            "observed_at": start + timedelta(hours=offset),
+            "apparent_temperature": 37.0,
+            "temperature_2m": 36.0,
+            "precipitation": 0.0,
+            "relative_humidity": 40.0,
+            "wind_speed": 5.0,
+        }
+        for offset in range(3)
+    ]
+    air = [
+        {
+            "city_id": "bengaluru",
+            "observed_at": start + timedelta(hours=offset),
+            "pm2_5": 20.0,
+            "pm10": 30.0,
+        }
+        for offset in range(3)
+    ]
+    historical = [
+        {
+            "city_id": "bengaluru",
+            "observed_date": datetime(year, 6, day, tzinfo=timezone.utc),
+            "temperature_2m": value,
+            "precipitation": 0.0,
+        }
+        for year in range(2021, 2026)
+        for day, value in enumerate([30.0, 31.0, 32.0, 33.0, 34.0], start=1)
+    ]
+    rule_definition = [
+        {
+            "ruleset_version": "test",
+            "rule_id": "local_heat",
+            "city_id": "bengaluru",
+            "month": 6,
+            "metric": "temperature_2m",
+            "operator": "greater_than_or_equal",
+            "operator_label": "at or above",
+            "comparison": "baseline_percentile",
+            "threshold": None,
+            "baseline_percentile": "p95",
+            "persistence_hours": 3,
+            "severity": "medium",
+        }
+    ]
+    member = [
+        {
+            "member_id": "M-1",
+            "city_id": "bengaluru",
+            "age_band": "40-59",
+            "preferred_language": "English",
+            "preferred_channel": "app",
+            "outreach_consent": True,
+            "last_contact_date": start.date(),
+        }
+    ]
+
+    raw = tmp_path / "data/raw"
+    write_rows(raw / f"source=open_meteo_weather/run_id={run_id}/bengaluru.parquet", weather)
+    write_rows(raw / f"source=open_meteo_air_quality/run_id={run_id}/bengaluru.parquet", air)
+    write_rows(raw / "source=nasa_power_daily/baseline_end_year=2025/city_id=bengaluru/year=2025/data.parquet", historical)
+    write_rows(raw / f"source=regional_rules/run_id={run_id}/rule_definitions.parquet", rule_definition)
+    write_rows(
+        raw / f"source=regional_rules/run_id={run_id}/rule_conditions.parquet",
+        [{"ruleset_version": "test", "rule_id": "local_heat", "condition": "diabetes"}],
+    )
+    write_rows(raw / f"source=synthetic_members/run_id={run_id}/members.parquet", member)
+    write_rows(
+        raw / f"source=synthetic_members/run_id={run_id}/member_conditions.parquet",
+        [{"member_id": "M-1", "condition": "diabetes"}],
+    )
+
+    build_marts(tmp_path, run_id)
+
+    triggers = pq.read_table(tmp_path / f"data/processed/run_id={run_id}/active_triggers.parquet").to_pylist()
+    assert len(triggers) == 1
+    assert triggers[0]["comparison"] == "baseline_percentile"
+    assert triggers[0]["effective_threshold"] < 36.0
+    assert triggers[0]["observed_persistence_hours"] == 3
+

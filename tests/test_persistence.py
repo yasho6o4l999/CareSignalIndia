@@ -16,6 +16,7 @@ def test_missing_hour_breaks_persistence_window(tmp_path) -> None:
             "city_id": "delhi",
             "observed_at": timestamp,
             "apparent_temperature": 41.0,
+            "temperature_2m": 40.0,
             "precipitation": 0.0,
             "relative_humidity": 40.0,
             "wind_speed": 5.0,
@@ -40,7 +41,9 @@ def test_missing_hour_breaks_persistence_window(tmp_path) -> None:
             "metric": "apparent_temperature",
             "operator": "greater_than_or_equal",
             "operator_label": "at or above",
+            "comparison": "absolute",
             "threshold": 40.0,
+            "baseline_percentile": None,
             "persistence_hours": 3,
             "severity": "high",
         }
@@ -58,6 +61,14 @@ def test_missing_hour_breaks_persistence_window(tmp_path) -> None:
         }
     ]
     member_condition = [{"member_id": "M-1", "condition": "diabetes"}]
+    historical = [
+        {
+            "city_id": "delhi",
+            "observed_date": start - timedelta(days=365),
+            "temperature_2m": 35.0,
+            "precipitation": 0.0,
+        }
+    ]
 
     raw = tmp_path / "data/raw"
     write_rows(raw / f"source=open_meteo_weather/run_id={run_id}/delhi.parquet", weather)
@@ -66,6 +77,7 @@ def test_missing_hour_breaks_persistence_window(tmp_path) -> None:
     write_rows(raw / f"source=regional_rules/run_id={run_id}/rule_conditions.parquet", rule_condition)
     write_rows(raw / f"source=synthetic_members/run_id={run_id}/members.parquet", member)
     write_rows(raw / f"source=synthetic_members/run_id={run_id}/member_conditions.parquet", member_condition)
+    write_rows(raw / "source=nasa_power_daily/baseline_end_year=2025/city_id=delhi/year=2025/data.parquet", historical)
 
     build_marts(tmp_path, run_id)
 

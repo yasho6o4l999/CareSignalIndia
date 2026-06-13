@@ -32,7 +32,9 @@ def compile_rules(rules: list[Rule]) -> tuple[list[dict], list[dict]]:
                         "metric": rule.metric,
                         "operator": rule.operator,
                         "operator_label": OPERATOR_LABELS[rule.operator],
+                        "comparison": rule.comparison,
                         "threshold": rule.threshold,
+                        "baseline_percentile": rule.baseline_percentile,
                         "persistence_hours": rule.persistence_hours,
                         "severity": rule.severity,
                     }
@@ -46,4 +48,3 @@ def compile_rules(rules: list[Rule]) -> tuple[list[dict], list[dict]]:
             for condition in rule.relevant_conditions
         )
     return definitions, conditions
-

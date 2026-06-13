@@ -11,6 +11,7 @@ The initial vertical slice supports Delhi, Mumbai, Bengaluru, Chennai, and Ahmed
 - Partitioned, ZSTD-compressed Parquet storage
 - DuckDB transformations directly over Parquet
 - Predicate pushdown in dashboard queries
+- Five-year NASA POWER historical baselines with city/month p90 and p95 thresholds
 - Deterministic synthetic members with consent controls
 - Machine-readable freshness, uniqueness, and non-empty quality checks
 - Configuration-driven regional rules with consecutive-hour persistence windows
@@ -36,6 +37,7 @@ streamlit run app.py
 
 - Open-Meteo Weather Forecast API: https://open-meteo.com/en/docs
 - Open-Meteo Air Quality API: https://open-meteo.com/en/docs/air-quality-api
+- NASA POWER Daily API: https://power.larc.nasa.gov/docs/services/api/temporal/daily/
 
 Open-Meteo's free endpoint is intended for non-commercial use. This repository is an educational candidate assignment.
 
@@ -44,6 +46,7 @@ Open-Meteo's free endpoint is intended for non-commercial use. This repository i
 Raw datasets are partitioned by `source` and `run_id`. DuckDB builds:
 
 - `city_conditions.parquet`
+- `historical_baselines.parquet`
 - `active_triggers.parquet`
 - `outreach_queue.parquet`
 - `stakeholder_alerts.parquet`
@@ -53,6 +56,16 @@ Regional rules are maintained in `config/regional_rules.yml`. Each ETL run compi
 rule-definition and rule-condition Parquet datasets with a deterministic ruleset version. DuckDB evaluates
 the applicable city, calendar month, metric, threshold, and operator. A trigger is published only after the
 configured number of consecutive hourly breaches; missing hours and non-breaching values break the streak.
+
+Rules may use either a fixed absolute threshold or a city/month historical percentile. The initial
+`locally_unusual_heat` rule compares hourly forecast temperature against the city's p95 historical daily
+maximum temperature for the matching calendar month, calculated from the previous five complete years.
+Absolute heat rules remain separate because a locally unusual condition and an absolute severe condition
+represent different operational signals.
+
+The five-year NASA POWER backfill is cached under a `baseline_end_year` partition. Six-hour forecast runs
+reuse that snapshot, and a new historical snapshot is fetched only when a new complete calendar year becomes
+available or the local cache is removed.
 
 ## SQL Ownership
 
@@ -73,14 +86,12 @@ The required reviewer workflow is manual. `deployment/crontab.example` demonstra
 
 ## Current Limitations
 
-- This initial version uses fixed transparent thresholds rather than city-specific historical percentiles.
 - Open-Meteo provides modeled air-quality forecasts rather than ground-station observations.
 - No messages are sent; the project only generates stakeholder and outreach queues.
 - The scheduler example is not installed automatically.
 
 ## Next Improvements
 
-- Add NASA POWER historical baselines and city-specific anomaly detection
 - Add quarantined-record outputs and partial-source publication
 - Add extraction manifests and incremental retention policies
 - Add mocked API integration tests and query-plan benchmarks

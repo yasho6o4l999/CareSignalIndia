@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 import duckdb
 
@@ -58,4 +58,36 @@ def run_quality_checks(run_id: str, raw_root: str) -> list[QualityResult]:
                 checked_at=checked_at,
             )
         )
+    historical = f"{raw_root}/source=nasa_power_daily/baseline_end_year={date.today().year - 1}/**/*.parquet"
+    count, city_count, year_count, latest = connection.execute(
+        render_sql("quality/profile_historical_dataset.sql", dataset_path=historical)
+    ).fetchone()
+    checks.extend(
+        [
+            QualityResult(
+                run_id=run_id,
+                check_name="historical_coverage",
+                dataset="historical_weather",
+                status="pass" if count >= 5 * 365 * 5 * 0.95 else "fail",
+                details=f"rows={count}, cities={city_count}, years={year_count}",
+                checked_at=checked_at,
+            ),
+            QualityResult(
+                run_id=run_id,
+                check_name="historical_city_coverage",
+                dataset="historical_weather",
+                status="pass" if city_count == 5 else "fail",
+                details=f"cities={city_count}",
+                checked_at=checked_at,
+            ),
+            QualityResult(
+                run_id=run_id,
+                check_name="historical_year_coverage",
+                dataset="historical_weather",
+                status="pass" if year_count == 5 else "fail",
+                details=f"years={year_count}, latest={latest}",
+                checked_at=checked_at,
+            ),
+        ]
+    )
     return checks

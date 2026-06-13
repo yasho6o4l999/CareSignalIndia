@@ -9,9 +9,31 @@ COPY (
         CROSS JOIN LATERAL (
             VALUES
                 ('apparent_temperature', apparent_temperature),
+                ('temperature_2m', temperature_2m),
                 ('precipitation', precipitation),
                 ('pm2_5', pm2_5)
         ) metrics(metric, metric_value)
+    ),
+    applicable_rules AS (
+        SELECT
+            r.* EXCLUDE (threshold),
+            r.threshold AS configured_threshold,
+            CASE
+                WHEN r.comparison = 'absolute' THEN r.threshold
+                WHEN r.baseline_percentile = 'p90' THEN b.p90_value
+                WHEN r.baseline_percentile = 'p95' THEN b.p95_value
+            END AS effective_threshold,
+            b.average_value AS baseline_average,
+            b.p90_value AS baseline_p90,
+            b.p95_value AS baseline_p95,
+            b.sample_count AS baseline_sample_count,
+            b.historical_years
+        FROM read_parquet('{rules_path}') r
+        LEFT JOIN read_parquet('{historical_baselines_path}') b
+            ON r.city_id = b.city_id
+           AND r.month = b.month
+           AND r.metric = b.metric
+        WHERE r.comparison = 'absolute' OR b.city_id IS NOT NULL
     ),
     evaluated AS (
         SELECT
@@ -23,12 +45,12 @@ COPY (
                 ORDER BY m.observed_at
             ) AS previous_observed_at,
             CASE
-                WHEN r.operator = 'greater_than_or_equal' THEN m.metric_value >= r.threshold
-                WHEN r.operator = 'less_than_or_equal' THEN m.metric_value <= r.threshold
+                WHEN r.operator = 'greater_than_or_equal' THEN m.metric_value >= r.effective_threshold
+                WHEN r.operator = 'less_than_or_equal' THEN m.metric_value <= r.effective_threshold
                 ELSE false
             END AS is_breach
         FROM metric_values m
-        INNER JOIN read_parquet('{rules_path}') r
+        INNER JOIN applicable_rules r
             ON m.city_id = r.city_id
            AND m.metric = r.metric
            AND month(m.observed_at) = r.month
@@ -58,7 +80,15 @@ COPY (
             metric,
             operator,
             operator_label,
-            threshold,
+            comparison,
+            configured_threshold,
+            baseline_percentile,
+            effective_threshold,
+            baseline_average,
+            baseline_p90,
+            baseline_p95,
+            baseline_sample_count,
+            historical_years,
             persistence_hours,
             severity,
             streak_group,
@@ -74,10 +104,16 @@ COPY (
     )
     SELECT
         *,
-        concat(
-            rule_id, ': ', metric, ' remained ', operator_label, ' ', threshold,
-            ' for ', observed_persistence_hours, ' consecutive forecast hours in ', city_id, '.'
-        ) AS trigger_explanation
+        CASE
+            WHEN comparison = 'baseline_percentile' THEN concat(
+                rule_id, ': ', metric, ' remained ', operator_label, ' the local ', baseline_percentile,
+                ' baseline of ', round(effective_threshold, 1), ' for ', observed_persistence_hours,
+                ' consecutive forecast hours in ', city_id, '.'
+            )
+            ELSE concat(
+                rule_id, ': ', metric, ' remained ', operator_label, ' ', effective_threshold,
+                ' for ', observed_persistence_hours, ' consecutive forecast hours in ', city_id, '.'
+            )
+        END AS trigger_explanation
     FROM qualifying_streaks
 ) TO '{output_path}' (FORMAT PARQUET, COMPRESSION ZSTD);
-

@@ -37,3 +37,18 @@ def test_rule_rejects_empty_city_list() -> None:
             cities=[],
             months=[1],
         )
+
+
+def test_baseline_rule_requires_percentile_without_fixed_threshold() -> None:
+    with pytest.raises(ValidationError):
+        Rule(
+            rule_id="invalid_baseline",
+            metric="temperature_2m",
+            operator="greater_than_or_equal",
+            comparison="baseline_percentile",
+            persistence_hours=3,
+            severity="medium",
+            relevant_conditions=["cardiovascular"],
+            cities=["delhi"],
+            months=[6],
+        )

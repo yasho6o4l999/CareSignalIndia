@@ -8,6 +8,16 @@ rules:
     relevant_conditions: [diabetes, cardiovascular, renal, respiratory]
     cities: [delhi, mumbai, bengaluru, chennai, ahmedabad]
     months: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+  - rule_id: locally_unusual_heat
+    metric: temperature_2m
+    operator: greater_than_or_equal
+    comparison: baseline_percentile
+    baseline_percentile: p95
+    persistence_hours: 3
+    severity: medium
+    relevant_conditions: [diabetes, cardiovascular, renal, respiratory]
+    cities: [delhi, mumbai, bengaluru, chennai, ahmedabad]
+    months: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
   - rule_id: cold_stress
     metric: apparent_temperature
     operator: less_than_or_equal
@@ -44,4 +54,3 @@ rules:
     relevant_conditions: [respiratory, cardiovascular]
     cities: [mumbai, bengaluru, chennai, ahmedabad]
     months: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
-

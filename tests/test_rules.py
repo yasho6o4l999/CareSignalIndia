@@ -18,3 +18,11 @@ def test_ruleset_version_is_deterministic() -> None:
     first, _ = compile_rules(load_rules())
     second, _ = compile_rules(load_rules())
     assert first[0]["ruleset_version"] == second[0]["ruleset_version"]
+
+
+def test_compiled_baseline_rule_keeps_comparison_metadata() -> None:
+    definitions, _ = compile_rules(load_rules())
+    baseline_rule = next(row for row in definitions if row["rule_id"] == "locally_unusual_heat")
+    assert baseline_rule["comparison"] == "baseline_percentile"
+    assert baseline_rule["baseline_percentile"] == "p95"
+    assert baseline_rule["threshold"] is None

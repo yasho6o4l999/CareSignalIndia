@@ -4,6 +4,9 @@ SELECT
     matched_conditions,
     rule_id,
     severity,
+    comparison,
+    effective_threshold,
+    baseline_percentile,
     priority_score,
     preferred_channel,
     preferred_language,
@@ -14,4 +17,3 @@ FROM read_parquet('{outreach_queue_path}')
 WHERE (? IS NULL OR city_id = ?)
 ORDER BY priority_score DESC
 LIMIT 500;
-

@@ -1,8 +1,9 @@
 import asyncio
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
+from src.clients.nasa_power import NasaPowerClient
 from src.clients.open_meteo import OpenMeteoClient
 from src.config import ROOT, load_cities, load_rules
 from src.pipeline.marts import build_marts
@@ -24,10 +25,31 @@ async def extract(run_id: str) -> None:
             asyncio.gather(*(client.fetch_weather(city) for city in cities)),
             asyncio.gather(*(client.fetch_air_quality(city) for city in cities)),
         )
+    history_end = date(date.today().year - 1, 12, 31)
+    history_start = date(history_end.year - 4, 1, 1)
+    history_root = ROOT / f"data/raw/source=nasa_power_daily/baseline_end_year={history_end.year}"
+    missing_history_cities = [
+        city for city in cities if not any((history_root / f"city_id={city.city_id}").glob("year=*/*.parquet"))
+    ]
+    historical_results: list[list] = []
+    if missing_history_cities:
+        async with NasaPowerClient() as client:
+            historical_results = await asyncio.gather(
+                *(client.fetch_daily_history(city, history_start, history_end) for city in missing_history_cities)
+            )
     for city, records in zip(cities, weather_results, strict=True):
         write_models(ROOT / f"data/raw/source=open_meteo_weather/run_id={run_id}/{city.city_id}.parquet", records)
     for city, records in zip(cities, air_results, strict=True):
         write_models(ROOT / f"data/raw/source=open_meteo_air_quality/run_id={run_id}/{city.city_id}.parquet", records)
+    for city, records in zip(missing_history_cities, historical_results, strict=True):
+        records_by_year: dict[int, list] = {}
+        for record in records:
+            records_by_year.setdefault(record.observed_date.year, []).append(record)
+        for year, year_records in records_by_year.items():
+            write_models(
+                history_root / f"city_id={city.city_id}/year={year}/data.parquet",
+                year_records,
+            )
 
     members, conditions = generate_members(cities)
     synthetic_root = ROOT / f"data/raw/source=synthetic_members/run_id={run_id}"

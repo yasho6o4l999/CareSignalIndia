@@ -3,6 +3,7 @@ COPY (
         w.city_id,
         w.observed_at,
         w.apparent_temperature,
+        w.temperature_2m,
         w.precipitation,
         w.relative_humidity,
         w.wind_speed,
@@ -12,4 +13,3 @@ COPY (
     INNER JOIN read_parquet('{air_path}') a USING (city_id, observed_at)
     WHERE w.observed_at >= current_timestamp
 ) TO '{output_path}' (FORMAT PARQUET, COMPRESSION ZSTD);
-

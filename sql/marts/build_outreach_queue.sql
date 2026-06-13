@@ -20,7 +20,15 @@ COPY (
             t.rule_id,
             t.metric,
             t.severity,
-            t.threshold,
+            t.comparison,
+            t.configured_threshold,
+            t.baseline_percentile,
+            t.effective_threshold,
+            t.baseline_average,
+            t.baseline_p90,
+            t.baseline_p95,
+            t.baseline_sample_count,
+            t.historical_years,
             t.persistence_hours,
             t.observed_persistence_hours,
             t.window_start,
@@ -43,4 +51,3 @@ COPY (
     FROM eligible
     GROUP BY ALL
 ) TO '{output_path}' (FORMAT PARQUET, COMPRESSION ZSTD);
-

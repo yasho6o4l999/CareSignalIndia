@@ -8,6 +8,7 @@ class WeatherRecord(BaseModel):
     city_id: str
     observed_at: datetime
     apparent_temperature: float = Field(ge=-80, le=80)
+    temperature_2m: float = Field(ge=-80, le=80)
     precipitation: float = Field(ge=0, le=1000)
     relative_humidity: float = Field(ge=0, le=100)
     wind_speed: float = Field(ge=0, le=500)
@@ -38,6 +39,22 @@ class AirQualityRecord(BaseModel):
         return value.astimezone(timezone.utc)
 
 
+class HistoricalWeatherRecord(BaseModel):
+    city_id: str
+    observed_date: datetime
+    temperature_2m: float = Field(ge=-80, le=80)
+    precipitation: float = Field(ge=0, le=1000)
+    source: Literal["nasa_power_daily"] = "nasa_power_daily"
+    extracted_at: datetime
+
+    @field_validator("observed_date", "extracted_at")
+    @classmethod
+    def timezone_required(cls, value: datetime) -> datetime:
+        if value.tzinfo is None:
+            raise ValueError("timestamp must be timezone-aware")
+        return value.astimezone(timezone.utc)
+
+
 class QualityResult(BaseModel):
     run_id: str
     check_name: str
@@ -45,4 +62,3 @@ class QualityResult(BaseModel):
     status: Literal["pass", "warning", "fail"]
     details: str
     checked_at: datetime
-

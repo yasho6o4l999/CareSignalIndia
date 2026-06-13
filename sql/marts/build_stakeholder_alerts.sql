@@ -5,7 +5,15 @@ COPY (
         city_id,
         severity,
         metric,
-        threshold,
+        comparison,
+        configured_threshold,
+        baseline_percentile,
+        effective_threshold,
+        baseline_average,
+        baseline_p90,
+        baseline_p95,
+        baseline_sample_count,
+        historical_years,
         persistence_hours,
         observed_persistence_hours,
         window_start,
@@ -16,4 +24,3 @@ COPY (
     FROM read_parquet('{outreach_queue_path}')
     GROUP BY ALL
 ) TO '{output_path}' (FORMAT PARQUET, COMPRESSION ZSTD);
-

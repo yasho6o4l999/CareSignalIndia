@@ -48,7 +48,7 @@ class OpenMeteoClient:
             {
                 "latitude": city.latitude,
                 "longitude": city.longitude,
-                "hourly": "apparent_temperature,precipitation,relative_humidity_2m,wind_speed_10m",
+                "hourly": "apparent_temperature,temperature_2m,precipitation,relative_humidity_2m,wind_speed_10m",
                 "forecast_days": 7,
                 "timezone": "UTC",
             },
@@ -60,6 +60,7 @@ class OpenMeteoClient:
                 city_id=city.city_id,
                 observed_at=datetime.fromisoformat(timestamp).replace(tzinfo=timezone.utc),
                 apparent_temperature=hourly["apparent_temperature"][index],
+                temperature_2m=hourly["temperature_2m"][index],
                 precipitation=hourly["precipitation"][index],
                 relative_humidity=hourly["relative_humidity_2m"][index],
                 wind_speed=hourly["wind_speed_10m"][index],
