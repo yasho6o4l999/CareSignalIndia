@@ -23,3 +23,17 @@ def test_rule_rejects_invalid_month() -> None:
             months=[13],
         )
 
+
+def test_rule_rejects_empty_city_list() -> None:
+    with pytest.raises(ValidationError):
+        Rule(
+            rule_id="invalid",
+            metric="pm2_5",
+            operator="greater_than_or_equal",
+            threshold=60,
+            persistence_hours=1,
+            severity="high",
+            relevant_conditions=["respiratory"],
+            cities=[],
+            months=[1],
+        )

@@ -39,7 +39,7 @@ col2.metric("Active stakeholder alerts", alerts.num_rows)
 col3.metric("Quality warnings/failures", quality_failures)
 
 st.subheader("Stakeholder alerts")
-st.dataframe(alerts, use_container_width=True)
+st.dataframe(alerts, width="stretch")
 
 st.subheader("Member outreach queue")
 city = st.selectbox("City", ["All", "delhi", "mumbai", "bengaluru", "chennai", "ahmedabad"])
@@ -47,8 +47,9 @@ predicate = "" if city == "All" else "WHERE city_id = ?"
 parameters = [] if city == "All" else [city]
 queue = connection.execute(
     f"""
-    SELECT member_id, city_id, condition, trigger_type, priority_score,
-           preferred_channel, preferred_language, observed_at
+    SELECT member_id, city_id, matched_conditions, rule_id, severity, priority_score,
+           preferred_channel, preferred_language, window_start, window_end,
+           trigger_explanation
     FROM read_parquet('{run_root / "outreach_queue.parquet"}')
     {predicate}
     ORDER BY priority_score DESC
@@ -56,7 +57,6 @@ queue = connection.execute(
     """,
     parameters,
 ).fetch_arrow_table()
-st.dataframe(queue, use_container_width=True)
+st.dataframe(queue, width="stretch")
 
 st.warning("Synthetic demonstration data only. This product does not provide medical advice or clinical risk scores.")
-

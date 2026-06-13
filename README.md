@@ -13,6 +13,7 @@ The initial vertical slice supports Delhi, Mumbai, Bengaluru, Chennai, and Ahmed
 - Predicate pushdown in dashboard queries
 - Deterministic synthetic members with consent controls
 - Machine-readable freshness, uniqueness, and non-empty quality checks
+- Configuration-driven regional rules with consecutive-hour persistence windows
 
 No pandas dependency is used. Generated data and credentials are excluded from Git.
 
@@ -43,9 +44,15 @@ Open-Meteo's free endpoint is intended for non-commercial use. This repository i
 Raw datasets are partitioned by `source` and `run_id`. DuckDB builds:
 
 - `city_conditions.parquet`
+- `active_triggers.parquet`
 - `outreach_queue.parquet`
 - `stakeholder_alerts.parquet`
 - `quality_results.parquet`
+
+Regional rules are maintained in `config/regional_rules.yml`. Each ETL run compiles them into normalized
+rule-definition and rule-condition Parquet datasets with a deterministic ruleset version. DuckDB evaluates
+the applicable city, calendar month, metric, threshold, and operator. A trigger is published only after the
+configured number of consecutive hourly breaches; missing hours and non-breaching values break the streak.
 
 Synthetic member data contains no names, contact details, exact addresses, or real identifiers. Outreach priority is an operational demonstration, not a clinical risk score.
 
@@ -56,7 +63,6 @@ The required reviewer workflow is manual. `deployment/crontab.example` demonstra
 ## Current Limitations
 
 - This initial version uses fixed transparent thresholds rather than city-specific historical percentiles.
-- Regional rules are validated but the first SQL mart contains a simplified equivalent rule implementation.
 - Open-Meteo provides modeled air-quality forecasts rather than ground-station observations.
 - No messages are sent; the project only generates stakeholder and outreach queues.
 - The scheduler example is not installed automatically.
@@ -64,7 +70,6 @@ The required reviewer workflow is manual. `deployment/crontab.example` demonstra
 ## Next Improvements
 
 - Add NASA POWER historical baselines and city-specific anomaly detection
-- Compile YAML regional rules into DuckDB evaluation tables
 - Add quarantined-record outputs and partial-source publication
 - Add extraction manifests and incremental retention policies
 - Add mocked API integration tests and query-plan benchmarks

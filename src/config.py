@@ -24,9 +24,9 @@ class Rule(BaseModel):
     threshold: float
     persistence_hours: int = Field(ge=1, le=168)
     severity: Literal["low", "medium", "high"]
-    relevant_conditions: list[str]
-    cities: list[str]
-    months: list[int]
+    relevant_conditions: list[str] = Field(min_length=1)
+    cities: list[str] = Field(min_length=1)
+    months: list[int] = Field(min_length=1)
 
     @field_validator("months")
     @classmethod
@@ -47,9 +47,11 @@ def load_cities() -> list[City]:
 
 def load_rules() -> list[Rule]:
     rules = [Rule.model_validate(item) for item in _load_yaml(ROOT / "config/regional_rules.yml")["rules"]]
+    rule_ids = [rule.rule_id for rule in rules]
+    if len(rule_ids) != len(set(rule_ids)):
+        raise ValueError("Rule IDs must be unique")
     city_ids = {city.city_id for city in load_cities()}
     unknown = {city for rule in rules for city in rule.cities if city not in city_ids}
     if unknown:
         raise ValueError(f"Rules reference unknown cities: {sorted(unknown)}")
     return rules
-

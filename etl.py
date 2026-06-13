@@ -7,6 +7,7 @@ from src.clients.open_meteo import OpenMeteoClient
 from src.config import ROOT, load_cities, load_rules
 from src.pipeline.marts import build_marts
 from src.quality import run_quality_checks
+from src.rules import compile_rules
 from src.storage import write_models, write_rows
 from src.synthetic import generate_members
 
@@ -17,6 +18,7 @@ LOGGER = logging.getLogger("caresignal")
 
 async def extract(run_id: str) -> None:
     cities = load_cities()
+    rules = load_rules()
     async with OpenMeteoClient() as client:
         weather_results, air_results = await asyncio.gather(
             asyncio.gather(*(client.fetch_weather(city) for city in cities)),
@@ -32,11 +34,15 @@ async def extract(run_id: str) -> None:
     write_rows(synthetic_root / "members.parquet", members)
     write_rows(synthetic_root / "member_conditions.parquet", conditions)
 
+    rule_definitions, rule_conditions = compile_rules(rules)
+    rules_root = ROOT / f"data/raw/source=regional_rules/run_id={run_id}"
+    write_rows(rules_root / "rule_definitions.parquet", rule_definitions)
+    write_rows(rules_root / "rule_conditions.parquet", rule_conditions)
+
 
 async def main() -> None:
     run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     LOGGER.info("Starting run_id=%s", run_id)
-    load_rules()
     await extract(run_id)
     quality_results = run_quality_checks(run_id, str(ROOT / "data/raw"))
     quality_path = ROOT / f"data/processed/run_id={run_id}/quality_results.parquet"
@@ -56,4 +62,3 @@ async def main() -> None:
 
 if __name__ == "__main__":
     asyncio.run(main())
-
