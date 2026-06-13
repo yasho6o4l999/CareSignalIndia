@@ -2,6 +2,7 @@ from datetime import datetime, timezone
 
 import duckdb
 import pytest
+import pyarrow.parquet as pq
 
 import etl
 from src.config import PublicationPolicy, load_cities
@@ -12,7 +13,10 @@ from src.storage import write_rows
 
 
 POLICY = PublicationPolicy(
-    required_sources=["open_meteo_weather", "open_meteo_air_quality", "nasa_power_daily"],
+    sources={
+        source: {"required": True, "maximum_age_hours": 24}
+        for source in ["open_meteo_weather", "open_meteo_air_quality", "nasa_power_daily"]
+    },
     minimum_complete_cities=5,
     minimum_complete_city_ratio=0.70,
 )
@@ -31,6 +35,13 @@ def test_readiness_supports_success_partial_success_and_failure() -> None:
 
     all_sources["open_meteo_air_quality"] -= {"city-4"}
     assert evaluate_readiness(cities, all_sources, POLICY).status == "failed"
+
+
+def test_readiness_requires_mandatory_cities() -> None:
+    cities = {f"city-{number}" for number in range(7)}
+    policy = POLICY.model_copy(update={"mandatory_cities": ["city-6"]})
+    all_sources = {source: set(cities) - {"city-6"} for source in POLICY.required_sources}
+    assert evaluate_readiness(cities, all_sources, policy).status == "failed"
 
 
 @pytest.mark.asyncio
@@ -138,3 +149,5 @@ def test_city_conditions_excludes_cities_outside_publication_set(tmp_path) -> No
     assert duckdb.connect().execute(
         render_sql("common/count_rows.sql", dataset_path=output)
     ).fetchone()[0] == 1
+    rolling_pm25 = pq.read_table(output, columns=["pm2_5_rolling_24h"]).column(0)[0].as_py()
+    assert rolling_pm25 == 20

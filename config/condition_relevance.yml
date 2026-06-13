@@ -1,0 +1,23 @@
+profiles:
+  all_chronic:
+    diabetes: high
+    cardiovascular: high
+    renal: high
+    respiratory: high
+  heat_vulnerable:
+    diabetes: high
+    cardiovascular: high
+    renal: high
+    respiratory: medium
+  cardio_respiratory:
+    cardiovascular: high
+    respiratory: high
+  coastal_heat:
+    diabetes: medium
+    cardiovascular: high
+    respiratory: high
+  operational_disruption:
+    diabetes: high
+    cardiovascular: high
+    renal: high
+    respiratory: high

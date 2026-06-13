@@ -52,11 +52,18 @@ class MetadataStore:
     def close(self) -> None:
         self.connection.close()
 
-    def start_run(self, run_id: str, ruleset_version: str, member_version: str, baseline_end_year: int) -> None:
+    def start_run(
+        self,
+        run_id: str,
+        ruleset_version: str,
+        member_version: str,
+        baseline_end_year: int,
+        configuration_version: str | None = None,
+    ) -> None:
         with self.connection:
             self.connection.execute(
                 read_sql("mutations/start_run.sql"),
-                (run_id, utc_now(), ruleset_version, member_version, baseline_end_year),
+                (run_id, utc_now(), ruleset_version, member_version, baseline_end_year, configuration_version),
             )
 
     def complete_run(self, run_id: str, status: str, counts: dict[str, int], error_message: str | None = None) -> None:

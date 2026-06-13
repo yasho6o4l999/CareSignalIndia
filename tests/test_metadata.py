@@ -3,7 +3,7 @@ from src.metadata import MetadataStore
 
 def test_metadata_run_lifecycle_and_latest_publication(tmp_path) -> None:
     store = MetadataStore(tmp_path / "pipeline.db")
-    store.start_run("run-1", "rules-1", "members-1", 2025)
+    store.start_run("run-1", "rules-1", "members-1", 2025, "config-1")
     store.record_readiness("run-1", "weather", "delhi", 10, "2026-06-13T00:00:00+00:00")
     store.record_dataset("run-1", "alerts", tmp_path / "alerts.parquet", 3)
     store.upsert_watermark("run-1", "weather", "delhi", "latest_successful_run", "run-1")
@@ -16,6 +16,7 @@ def test_metadata_run_lifecycle_and_latest_publication(tmp_path) -> None:
     latest = store.latest_published_run()
     assert latest["run_id"] == "run-1"
     assert latest["records_published"] == 3
+    assert latest["configuration_version"] == "config-1"
     assert store.query("queries/latest_source_readiness.sql", ("run-1",))[0]["status"] == "success"
     assert store.watermark("weather", "delhi", "latest_successful_run") == "run-1"
     store.close()

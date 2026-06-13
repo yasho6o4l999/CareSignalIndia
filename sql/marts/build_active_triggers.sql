@@ -14,7 +14,8 @@ COPY (
                 ('apparent_temperature_uplift', apparent_temperature_uplift),
                 ('relative_humidity', relative_humidity),
                 ('wind_speed', wind_speed),
-                ('pm2_5', pm2_5)
+                ('pm2_5', pm2_5),
+                ('pm2_5_rolling_24h', pm2_5_rolling_24h)
         ) metrics(metric, metric_value)
     ),
     applicable_predicates AS (
@@ -57,6 +58,12 @@ COPY (
                 WHEN p.operator = 'less_than_or_equal' THEN m.metric_value <= p.effective_threshold
                 ELSE false
             END AS predicate_satisfied,
+            CASE
+                WHEN p.operator = 'greater_than_or_equal'
+                    THEN 1 + ((m.metric_value - p.effective_threshold) / greatest(abs(p.effective_threshold), 1))
+                WHEN p.operator = 'less_than_or_equal'
+                    THEN 1 + ((p.effective_threshold - m.metric_value) / greatest(abs(p.effective_threshold), 1))
+            END AS threshold_ratio,
             concat(
                 p.metric, ' ', p.operator_label, ' ',
                 CASE
@@ -81,15 +88,18 @@ COPY (
             max(predicate_count) AS predicate_count,
             persistence_hours,
             severity,
+            signal_name,
+            signal_category,
             observed_at,
             count(*) FILTER (WHERE predicate_satisfied) = max(predicate_count) AS is_breach,
+            min(threshold_ratio) AS threshold_ratio,
             string_agg(predicate_explanation, ' AND ' ORDER BY predicate_index) AS predicate_explanation,
             list(metric ORDER BY predicate_index) AS metrics,
             list(metric_value ORDER BY predicate_index) AS metric_values,
             list(effective_threshold ORDER BY predicate_index) AS effective_thresholds
         FROM predicate_evaluations
         GROUP BY ruleset_version, rule_id, city_id, month, condition_logic,
-                 persistence_hours, severity, observed_at
+                 persistence_hours, severity, signal_name, signal_category, observed_at
         HAVING count(*) = max(predicate_count)
     ),
     with_previous AS (
@@ -118,26 +128,51 @@ COPY (
             ) AS streak_group
         FROM with_previous
     )
+    , persisted_windows AS (
+        SELECT
+            ruleset_version,
+            rule_id,
+            city_id,
+            signal_name,
+            signal_category,
+            predicate_count,
+            persistence_hours,
+            streak_group,
+            min(observed_at) AS window_start,
+            max(observed_at) AS window_end,
+            count(*) AS observed_persistence_hours,
+            min(threshold_ratio) AS threshold_ratio,
+            any_value(metrics) AS metrics,
+            any_value(effective_thresholds) AS effective_thresholds,
+            any_value(predicate_explanation) AS predicate_explanation
+        FROM grouped
+        WHERE is_breach
+        GROUP BY ruleset_version, rule_id, city_id, signal_name, signal_category,
+                 predicate_count, persistence_hours, streak_group
+        HAVING count(*) >= persistence_hours
+    ),
+    qualified_severity AS (
+        SELECT
+            w.*,
+            b.severity,
+            b.severity_rank,
+            row_number() OVER (
+                PARTITION BY w.ruleset_version, w.rule_id, w.city_id, w.streak_group
+                ORDER BY b.severity_rank DESC
+            ) AS severity_choice
+        FROM persisted_windows w
+        INNER JOIN read_parquet('{rule_severity_bands_path}') b
+            ON w.ruleset_version = b.ruleset_version
+           AND w.rule_id = b.rule_id
+           AND w.observed_persistence_hours >= b.minimum_persistence_hours
+           AND w.threshold_ratio >= b.minimum_threshold_ratio
+    )
     SELECT
-        ruleset_version,
-        rule_id,
-        city_id,
-        severity,
-        predicate_count,
-        persistence_hours,
-        streak_group,
-        min(observed_at) AS window_start,
-        max(observed_at) AS window_end,
-        count(*) AS observed_persistence_hours,
-        any_value(metrics) AS metrics,
-        any_value(effective_thresholds) AS effective_thresholds,
-        any_value(predicate_explanation) AS predicate_explanation,
+        * EXCLUDE (severity_choice),
         concat(
-            rule_id, ': ', any_value(predicate_explanation), ' for ', count(*),
+            signal_name, ': ', predicate_explanation, ' for ', observed_persistence_hours,
             ' consecutive forecast hours in ', city_id, '.'
         ) AS trigger_explanation
-    FROM grouped
-    WHERE is_breach
-    GROUP BY ruleset_version, rule_id, city_id, severity, predicate_count, persistence_hours, streak_group
-    HAVING count(*) >= persistence_hours
+    FROM qualified_severity
+    WHERE severity_choice = 1
 ) TO '{output_path}' (FORMAT PARQUET, COMPRESSION ZSTD);

@@ -3,7 +3,7 @@ from src.rules import compile_rules
 
 
 def test_compile_rules_expands_city_month_and_condition_dimensions() -> None:
-    definitions, predicates, conditions = compile_rules(load_rules())
+    definitions, predicates, conditions, severity_bands = compile_rules(load_rules())
     delhi_winter = [row for row in definitions if row["rule_id"] == "delhi_winter_pm25"]
 
     assert len(delhi_winter) == 4
@@ -12,16 +12,17 @@ def test_compile_rules_expands_city_month_and_condition_dimensions() -> None:
     assert {
         row["condition"] for row in conditions if row["rule_id"] == "delhi_winter_pm25"
     } == {"respiratory", "cardiovascular"}
+    assert any(row["severity"] == "critical" for row in severity_bands if row["rule_id"] == "heat_stress")
 
 
 def test_ruleset_version_is_deterministic() -> None:
-    first, _, _ = compile_rules(load_rules())
-    second, _, _ = compile_rules(load_rules())
+    first, _, _, _ = compile_rules(load_rules())
+    second, _, _, _ = compile_rules(load_rules())
     assert first[0]["ruleset_version"] == second[0]["ruleset_version"]
 
 
 def test_compiled_baseline_rule_keeps_comparison_metadata() -> None:
-    _, predicates, _ = compile_rules(load_rules())
+    _, predicates, _, _ = compile_rules(load_rules())
     baseline_rule = next(row for row in predicates if row["rule_id"] == "locally_unusual_heat")
     assert baseline_rule["comparison"] == "baseline_percentile"
     assert baseline_rule["baseline_percentile"] == "p95"

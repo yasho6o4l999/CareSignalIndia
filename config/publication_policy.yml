@@ -1,6 +1,13 @@
-required_sources:
-  - open_meteo_weather
-  - open_meteo_air_quality
-  - nasa_power_daily
+sources:
+  open_meteo_weather:
+    required: true
+    maximum_age_hours: 6
+  open_meteo_air_quality:
+    required: true
+    maximum_age_hours: 6
+  nasa_power_daily:
+    required: true
+    maximum_age_hours: 9600
 minimum_complete_cities: 5
 minimum_complete_city_ratio: 0.70
+mandatory_cities: [delhi, mumbai, chennai]

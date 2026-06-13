@@ -6,6 +6,7 @@ __pycache__/
 *.py[cod]
 *.log
 .DS_Store
+uv.lock
 data/raw/*
 data/processed/*
 data/quarantine/*

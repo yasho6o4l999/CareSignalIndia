@@ -1,0 +1,11 @@
+synthetic_members:
+  member_count: 5000
+  seed: 20260612
+  city_weights:
+    delhi: 1.2
+    mumbai: 1.1
+    bengaluru: 1.0
+    chennai: 1.0
+    ahmedabad: 0.8
+    lucknow: 0.8
+    jaipur: 0.8

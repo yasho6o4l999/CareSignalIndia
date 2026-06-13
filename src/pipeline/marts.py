@@ -13,6 +13,7 @@ def build_marts(
     members_root: Path | None = None,
     rules_root: Path | None = None,
     publication_cities: Path | None = None,
+    cooldown_hours: int = 0,
 ) -> None:
     raw = root / "data/raw"
     processed = processed or root / "data/processed" / f"run_id={run_id}"
@@ -29,6 +30,7 @@ def build_marts(
     rules = rules_root / "rule_definitions.parquet"
     rule_predicates = rules_root / "rule_predicates.parquet"
     rule_conditions = rules_root / "rule_conditions.parquet"
+    rule_severity_bands = rules_root / "rule_severity_bands.parquet"
     history = raw / f"source=nasa_power_daily/schema_version=v2/baseline_end_year={date.today().year - 1}" / "**/*.parquet"
     historical_baselines = processed / "historical_baselines.parquet"
     city_conditions = processed / "city_conditions.parquet"
@@ -59,6 +61,7 @@ def build_marts(
             city_conditions_path=city_conditions,
             rules_path=rules,
             rule_predicates_path=rule_predicates,
+            rule_severity_bands_path=rule_severity_bands,
             historical_baselines_path=historical_baselines,
             output_path=active_triggers,
         )
@@ -70,6 +73,7 @@ def build_marts(
             member_conditions_path=member_conditions,
             active_triggers_path=active_triggers,
             rule_conditions_path=rule_conditions,
+            cooldown_hours=cooldown_hours,
             output_path=outreach_queue,
         )
     )

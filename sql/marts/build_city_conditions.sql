@@ -34,6 +34,11 @@ COPY (
             PARTITION BY city_id, CAST(observed_at AS DATE)
         ) - min(temperature_2m) OVER (
             PARTITION BY city_id, CAST(observed_at AS DATE)
-        ) AS daily_temperature_range
+        ) AS daily_temperature_range,
+        avg(pm2_5) OVER (
+            PARTITION BY city_id
+            ORDER BY observed_at
+            RANGE BETWEEN INTERVAL 23 HOURS PRECEDING AND CURRENT ROW
+        ) AS pm2_5_rolling_24h
     FROM joined
 ) TO '{output_path}' (FORMAT PARQUET, COMPRESSION ZSTD);

@@ -1,0 +1,95 @@
+signals:
+  heat_stress:
+    name: Sustained Heat Stress
+    description: Sustained absolute apparent-temperature exposure across supported cities.
+    category: environmental_health_risk
+    condition_profile: heat_vulnerable
+    rationale: Prototype direct heat-exposure signal for chronic-care review.
+    source_references: [{name: Open-Meteo Weather API, url: https://open-meteo.com/en/docs}]
+    severity_bands:
+      - {severity: high, minimum_persistence_hours: 3, minimum_threshold_ratio: 1.0}
+      - {severity: critical, minimum_persistence_hours: 6, minimum_threshold_ratio: 1.1}
+  locally_unusual_heat:
+    name: Locally Unusual Heat
+    description: Forecast temperature above the local city-month historical p95.
+    category: environmental_health_risk
+    condition_profile: heat_vulnerable
+    rationale: Detects locally unusual exposure that a national absolute threshold may miss.
+    source_references: [{name: NASA POWER Daily API, url: https://power.larc.nasa.gov/docs/services/api/temporal/daily/}]
+  cold_stress:
+    name: Sustained Cold Stress
+    description: Sustained low apparent-temperature exposure in selected inland cities.
+    category: environmental_health_risk
+    condition_profile: cardio_respiratory
+    rationale: Prototype cold-exposure signal for cardiovascular and respiratory review.
+    source_references: [{name: Open-Meteo Weather API, url: https://open-meteo.com/en/docs}]
+  heavy_rain:
+    name: Heavy Rain Disruption
+    description: Short-duration heavy rainfall that may disrupt care access.
+    category: care_access_disruption
+    condition_profile: operational_disruption
+    rationale: Identifies potential appointment, travel, and medication-access disruption.
+    source_references: [{name: Open-Meteo Weather API, url: https://open-meteo.com/en/docs}]
+  mumbai_monsoon_disruption:
+    name: Mumbai Monsoon Disruption
+    description: Locally extreme monsoon rainfall in Mumbai.
+    category: care_access_disruption
+    condition_profile: operational_disruption
+    rationale: Captures Mumbai-specific monsoon care-access disruption.
+    source_references: [{name: NASA POWER Daily API, url: https://power.larc.nasa.gov/docs/services/api/temporal/daily/}]
+  chennai_northeast_monsoon_disruption:
+    name: Chennai Northeast Monsoon Disruption
+    description: Locally extreme rainfall combined with high wind.
+    category: care_access_disruption
+    condition_profile: operational_disruption
+    rationale: Captures Chennai-specific northeast monsoon disruption.
+    source_references: [{name: Open-Meteo Weather API, url: https://open-meteo.com/en/docs}]
+  coastal_heat_humidity_stress:
+    name: Coastal Heat And Humidity Stress
+    description: High apparent-temperature uplift combined with high humidity.
+    category: environmental_health_risk
+    condition_profile: coastal_heat
+    rationale: Captures humid coastal heat exposure.
+    source_references: [{name: Open-Meteo Weather API, url: https://open-meteo.com/en/docs}]
+  ahmedabad_sustained_hot_nights:
+    name: Ahmedabad Sustained Day And Night Heat
+    description: Locally unusual daytime and nighttime heat.
+    category: environmental_health_risk
+    condition_profile: heat_vulnerable
+    rationale: Captures limited overnight heat relief.
+    source_references: [{name: NASA POWER Daily API, url: https://power.larc.nasa.gov/docs/services/api/temporal/daily/}]
+  coastal_high_wind_disruption:
+    name: Coastal High-Wind Disruption
+    description: Heavy rainfall combined with high wind in coastal cities.
+    category: care_access_disruption
+    condition_profile: operational_disruption
+    rationale: Captures combined coastal weather disruption.
+    source_references: [{name: Open-Meteo Weather API, url: https://open-meteo.com/en/docs}]
+  winter_cold_pollution_compound:
+    name: Winter Cold And Pollution Compound
+    description: Elevated particulate pollution combined with locally unusual cold.
+    category: environmental_health_risk
+    condition_profile: cardio_respiratory
+    rationale: Captures compound winter exposure in north Indian cities.
+    source_references: [{name: CPCB National AQI, url: https://airquality.cpcb.gov.in/AQI_India/}]
+  jaipur_temperature_swing:
+    name: Jaipur Temperature Swing
+    description: Daily temperature range above Jaipur's local historical p95.
+    category: environmental_health_risk
+    condition_profile: cardio_respiratory
+    rationale: Captures large day-to-night temperature changes.
+    source_references: [{name: NASA POWER Daily API, url: https://power.larc.nasa.gov/docs/services/api/temporal/daily/}]
+  delhi_winter_pm25:
+    name: Delhi Winter PM2.5
+    description: Sustained elevated rolling PM2.5 during Delhi winter.
+    category: environmental_health_risk
+    condition_profile: cardio_respiratory
+    rationale: Captures Delhi's recurring winter particulate-pollution conditions.
+    source_references: [{name: CPCB National AQI, url: https://airquality.cpcb.gov.in/AQI_India/}]
+  particulate_pollution:
+    name: Sustained Particulate Pollution
+    description: Sustained elevated rolling PM2.5 outside the Delhi-specific scenario.
+    category: environmental_health_risk
+    condition_profile: cardio_respiratory
+    rationale: Captures sustained particulate-pollution exposure.
+    source_references: [{name: WHO Global Air Quality Guidelines, url: https://www.who.int/publications/i/item/9789240034228}]

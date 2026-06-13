@@ -52,6 +52,8 @@ def test_baseline_rule_uses_city_month_p95_as_effective_threshold(tmp_path) -> N
             "predicate_count": 2,
             "persistence_hours": 3,
             "severity": "medium",
+            "signal_name": "Local Heat",
+            "signal_category": "environmental_health_risk",
         }
     ]
     rule_predicate = [
@@ -98,7 +100,28 @@ def test_baseline_rule_uses_city_month_p95_as_effective_threshold(tmp_path) -> N
     write_rows(raw / f"source=regional_rules/run_id={run_id}/rule_predicates.parquet", rule_predicate)
     write_rows(
         raw / f"source=regional_rules/run_id={run_id}/rule_conditions.parquet",
-        [{"ruleset_version": "test", "rule_id": "local_heat", "condition": "diabetes"}],
+        [{"ruleset_version": "test", "rule_id": "local_heat", "condition": "diabetes", "relevance": "high"}],
+    )
+    write_rows(
+        raw / f"source=regional_rules/run_id={run_id}/rule_severity_bands.parquet",
+        [
+            {
+                "ruleset_version": "test",
+                "rule_id": "local_heat",
+                "severity": "medium",
+                "minimum_persistence_hours": 3,
+                "minimum_threshold_ratio": 1.0,
+                "severity_rank": 2,
+            },
+            {
+                "ruleset_version": "test",
+                "rule_id": "local_heat",
+                "severity": "critical",
+                "minimum_persistence_hours": 3,
+                "minimum_threshold_ratio": 1.0,
+                "severity_rank": 4,
+            },
+        ],
     )
     write_rows(raw / f"source=synthetic_members/run_id={run_id}/members.parquet", member)
     write_rows(
@@ -114,3 +137,7 @@ def test_baseline_rule_uses_city_month_p95_as_effective_threshold(tmp_path) -> N
     assert triggers[0]["metrics"] == ["temperature_2m", "relative_humidity"]
     assert triggers[0]["effective_thresholds"][0] < 36.0
     assert triggers[0]["observed_persistence_hours"] == 3
+    assert triggers[0]["severity"] == "critical"
+
+    outreach = pq.read_table(tmp_path / f"data/processed/run_id={run_id}/outreach_queue.parquet").to_pylist()
+    assert outreach == []

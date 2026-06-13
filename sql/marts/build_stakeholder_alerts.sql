@@ -2,6 +2,8 @@ COPY (
     SELECT
         ruleset_version,
         rule_id,
+        signal_name,
+        signal_category,
         city_id,
         severity,
         predicate_count,

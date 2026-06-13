@@ -18,6 +18,8 @@ heat, coastal high-wind disruption, winter cold-plus-pollution exposure, and Jai
 - Deterministic synthetic members with consent controls
 - Machine-readable freshness, uniqueness, and non-empty quality checks
 - Configuration-driven regional rules with consecutive-hour persistence windows
+- Governed signal catalog, condition-relevance profiles, dynamic severity bands, and outreach cooldown
+- Environment overrides and deterministic configuration lineage stored with every pipeline run
 
 See [`docs/architecture.md`](docs/architecture.md) for the current high-level and low-level architecture
 diagrams, component contracts, review sequence, and explicit boundary between implemented capabilities and
@@ -59,8 +61,10 @@ Raw datasets are partitioned by `source` and `run_id`. DuckDB builds:
 - `stakeholder_alerts.parquet`
 - `quality_results.parquet`
 
-Regional rules are maintained in `config/regional_rules.yml`. Each ETL run compiles them into normalized
-rule-definition and rule-condition Parquet datasets with a deterministic ruleset version. DuckDB evaluates
+Regional detection rules are maintained in `config/regional_rules.yml`; governed descriptions, rationale,
+ownership, evidence links, condition profiles, and severity bands live in `config/signal_catalog.yml`.
+Each ETL run compiles them into normalized rule-definition, predicate, condition-relevance, and severity-band
+Parquet datasets with a deterministic ruleset version. DuckDB evaluates
 the applicable city, calendar month, metric, threshold, and operator. A trigger is published only after the
 configured number of consecutive hourly breaches; missing hours and non-breaching values break the streak.
 
@@ -73,6 +77,16 @@ represent different operational signals.
 Rules may contain multiple environmental predicates. Every predicate must be satisfied during the same
 forecast hour before the rule-level persistence clock advances. This supports compound scenarios without
 hardcoding city-specific logic into SQL.
+
+The configuration layer is validated independently with:
+
+```bash
+python -m src.validate_config
+```
+
+`config/runtime.yml` owns deterministic synthetic-member settings, `config/publication_policy.yml` owns
+source-aware publication gates, `config/outreach_policy.yml` owns contact cooldown, and
+`config/environments/` contains environment-specific overrides selected by `CARESIGNAL_ENV`.
 
 ### Regional Scenario Catalog
 
@@ -109,7 +123,7 @@ SQLite at `data/metadata/pipeline.db` is the authoritative operational state sto
 source-city readiness, watermarks, invalid records, and published-dataset lineage. The dashboard selects the
 latest published run from SQLite; `latest_run.json` is no longer used.
 
-Synthetic members are cached by generator and city-set version under `data/reference/synthetic_members/`.
+Synthetic members are cached by generator, weighted city distribution, seed, count, and city-set version under `data/reference/synthetic_members/`.
 Compiled regional rules are cached by deterministic ruleset hash under `data/reference/regional_rules/`.
 Forecast-driven marts remain immutable per-run snapshots.
 
@@ -118,9 +132,10 @@ pass before the directory is atomically published. Failed runs remain recorded i
 the latest successful dashboard run. The local retention policy keeps the five newest forecast/raw and
 processed snapshots while preserving SQLite run history and reusable reference datasets.
 
-Publication readiness is configured in `config/publication_policy.yml`. A city is complete only when weather,
-air-quality, and historical-baseline data are available. Seven complete cities produces `success`; at least
-five complete cities produces `partial_success`; fewer than five prevents publication. Isolated source-city
+Publication readiness is configured in `config/publication_policy.yml`. A city is complete only when its
+expected required sources are available and within the source-specific freshness limit. Mandatory cities
+must be complete for partial publication. Seven complete cities produces `success`; at least five complete
+cities including all mandatory cities produces `partial_success`; otherwise publication is prevented. Isolated source-city
 failures are quarantined, shown in the dashboard, and do not advance their previous successful watermarks.
 
 Forecast snapshots are incrementally merged using each source-city `latest_successful_run` watermark. Because
@@ -140,6 +155,7 @@ The required reviewer workflow is manual. `deployment/crontab.example` demonstra
 
 - Open-Meteo provides modeled air-quality forecasts rather than ground-station observations.
 - No messages are sent; the project only generates stakeholder and outreach queues.
+- Severity-escalation repeat outreach is configured but requires production action-history data before it can be enforced.
 - The scheduler example is not installed automatically.
 
 ## Next Improvements

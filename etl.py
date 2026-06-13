@@ -11,7 +11,16 @@ import duckdb
 
 from src.clients.nasa_power import NasaPowerClient
 from src.clients.open_meteo import OpenMeteoClient
-from src.config import ROOT, load_cities, load_incremental_policy, load_publication_policy, load_rules
+from src.config import (
+    ROOT,
+    configuration_version,
+    load_cities,
+    load_incremental_policy,
+    load_outreach_policy,
+    load_publication_policy,
+    load_rules,
+    load_runtime_settings,
+)
 from src.incremental import ChangeMetrics, merge_forecast_snapshot
 from src.metadata import MetadataStore
 from src.pipeline.marts import build_marts
@@ -37,6 +46,7 @@ class ExtractionResult:
     unchanged: int = 0
     rejected: int = 0
     successful_cities_by_source: dict[str, set[str]] = field(default_factory=dict)
+    latest_source_timestamps: dict[str, dict[str, str]] = field(default_factory=dict)
 
     def record_success(
         self,
@@ -44,6 +54,7 @@ class ExtractionResult:
         city_id: str,
         records: int,
         metrics: ChangeMetrics | None = None,
+        latest: str | None = None,
     ) -> None:
         self.records += records
         if metrics:
@@ -52,6 +63,8 @@ class ExtractionResult:
             self.unchanged += metrics.unchanged
             self.rejected += metrics.rejected
         self.successful_cities_by_source.setdefault(source, set()).add(city_id)
+        if latest:
+            self.latest_source_timestamps.setdefault(source, {})[city_id] = latest
 
     def merge(self, other: "ExtractionResult") -> None:
         self.records += other.records
@@ -62,6 +75,8 @@ class ExtractionResult:
         self.rejected += other.rejected
         for source, cities in other.successful_cities_by_source.items():
             self.successful_cities_by_source.setdefault(source, set()).update(cities)
+        for source, timestamps in other.latest_source_timestamps.items():
+            self.latest_source_timestamps.setdefault(source, {}).update(timestamps)
 
 
 def latest_timestamp(records: list) -> str | None:
@@ -75,26 +90,34 @@ def latest_timestamp(records: list) -> str | None:
 
 def ensure_references() -> tuple[Path, Path, str, str]:
     cities = load_cities()
-    member_version = member_reference_version(cities)
+    member_policy = load_runtime_settings().synthetic_members
+    member_version = member_reference_version(cities, member_policy)
     member_root = ROOT / f"data/reference/synthetic_members/version={member_version}"
     member_files = [member_root / "members.parquet", member_root / "member_conditions.parquet"]
     if not all(path.exists() for path in member_files):
-        members, conditions = generate_members(cities)
+        members, conditions = generate_members(
+            cities,
+            count=member_policy.member_count,
+            seed=member_policy.seed,
+            city_weights=member_policy.city_weights,
+        )
         write_rows(member_root / "members.parquet", members)
         write_rows(member_root / "member_conditions.parquet", conditions)
 
-    definitions, predicates, conditions = compile_rules(load_rules())
+    definitions, predicates, conditions, severity_bands = compile_rules(load_rules())
     ruleset_version = definitions[0]["ruleset_version"]
     rules_root = ROOT / f"data/reference/regional_rules/ruleset_version={ruleset_version}"
     rule_files = [
         rules_root / "rule_definitions.parquet",
         rules_root / "rule_predicates.parquet",
         rules_root / "rule_conditions.parquet",
+        rules_root / "rule_severity_bands.parquet",
     ]
     if not all(path.exists() for path in rule_files):
         write_rows(rules_root / "rule_definitions.parquet", definitions)
         write_rows(rules_root / "rule_predicates.parquet", predicates)
         write_rows(rules_root / "rule_conditions.parquet", conditions)
+        write_rows(rules_root / "rule_severity_bands.parquet", severity_bands)
     return member_root, rules_root, member_version, ruleset_version
 
 
@@ -135,18 +158,19 @@ async def extract_forecasts(run_id: str, metadata: MetadataStore) -> ExtractionR
                 if previous_run else None
             )
             metrics = merge_forecast_snapshot(source, result, previous_path, output_path, cutoff)
+            latest = latest_timestamp(result)
             metadata.record_readiness(
                 run_id,
                 source,
                 city.city_id,
                 len(result),
-                latest_timestamp(result),
+                latest,
                 metrics.inserted,
                 metrics.updated,
                 metrics.unchanged,
                 metrics.rejected,
             )
-            extraction.record_success(source, city.city_id, len(result), metrics)
+            extraction.record_success(source, city.city_id, len(result), metrics, latest)
     return extraction
 
 
@@ -158,7 +182,7 @@ async def ensure_history(run_id: str, metadata: MetadataStore, baseline_end_year
     cached = [city for city in cities if city not in missing]
     for city in cached:
         metadata.record_readiness(run_id, "nasa_power_daily", city.city_id, 0, f"{baseline_end_year}-12-31")
-        extraction.record_success("nasa_power_daily", city.city_id, 0)
+        extraction.record_success("nasa_power_daily", city.city_id, 0, latest=f"{baseline_end_year}-12-31")
     if not missing:
         return extraction
 
@@ -179,12 +203,13 @@ async def ensure_history(run_id: str, metadata: MetadataStore, baseline_end_year
             by_year.setdefault(record.observed_date.year, []).append(record)
         for year, records in by_year.items():
             extraction.records += write_models(history_root / f"city_id={city.city_id}/year={year}/data.parquet", records)
+        latest = latest_timestamp(result)
         metadata.record_readiness(
             run_id,
             "nasa_power_daily",
             city.city_id,
             len(result),
-            latest_timestamp(result),
+            latest,
             inserted=len(result),
         )
         extraction.record_success(
@@ -192,6 +217,7 @@ async def ensure_history(run_id: str, metadata: MetadataStore, baseline_end_year
             city.city_id,
             0,
             ChangeMetrics(inserted=len(result), updated=0, unchanged=0),
+            latest,
         )
     return extraction
 
@@ -249,7 +275,13 @@ async def main() -> None:
     baseline_end_year = date.today().year - 1
     metadata = MetadataStore()
     member_root, rules_root, member_version, ruleset_version = ensure_references()
-    metadata.start_run(run_id, ruleset_version, member_version, baseline_end_year)
+    metadata.start_run(
+        run_id,
+        ruleset_version,
+        member_version,
+        baseline_end_year,
+        configuration_version(),
+    )
     counts = {
         "extracted": 0, "valid": 0, "invalid": 0, "published": 0,
         "inserted": 0, "updated": 0, "unchanged": 0, "rejected": 0,
@@ -272,6 +304,8 @@ async def main() -> None:
             {city.city_id for city in cities},
             extraction.successful_cities_by_source,
             load_publication_policy(),
+            {city.city_id: set(city.expected_sources) for city in cities},
+            extraction.latest_source_timestamps,
         )
         if readiness.status == "failed":
             raise RuntimeError(f"Publication readiness failed: {readiness.summary}")
@@ -290,6 +324,7 @@ async def main() -> None:
             members_root=member_root,
             rules_root=rules_root,
             publication_cities=publication_cities,
+            cooldown_hours=load_outreach_policy().cooldown_hours,
         )
         verify_publication(staging)
         counts["published"] = publish_run(run_id, staging, metadata)

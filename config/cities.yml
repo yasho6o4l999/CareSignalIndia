@@ -5,39 +5,56 @@ cities:
     longitude: 77.2090
     timezone: Asia/Kolkata
     climate_zone: north_inland
+    criticality: high
+    supported_languages: [Hindi, English]
+    expected_sources: [open_meteo_weather, open_meteo_air_quality, nasa_power_daily]
   - city_id: mumbai
     city_name: Mumbai
     latitude: 19.0760
     longitude: 72.8777
     timezone: Asia/Kolkata
     climate_zone: west_coastal
+    criticality: high
+    supported_languages: [Marathi, Hindi, English]
+    expected_sources: [open_meteo_weather, open_meteo_air_quality, nasa_power_daily]
   - city_id: bengaluru
     city_name: Bengaluru
     latitude: 12.9716
     longitude: 77.5946
     timezone: Asia/Kolkata
     climate_zone: south_plateau
+    supported_languages: [Kannada, English, Hindi]
+    expected_sources: [open_meteo_weather, open_meteo_air_quality, nasa_power_daily]
   - city_id: chennai
     city_name: Chennai
     latitude: 13.0827
     longitude: 80.2707
     timezone: Asia/Kolkata
     climate_zone: south_coastal
+    criticality: high
+    supported_languages: [Tamil, English]
+    expected_sources: [open_meteo_weather, open_meteo_air_quality, nasa_power_daily]
   - city_id: ahmedabad
     city_name: Ahmedabad
     latitude: 23.0225
     longitude: 72.5714
     timezone: Asia/Kolkata
     climate_zone: west_inland
+    supported_languages: [Gujarati, Hindi, English]
+    expected_sources: [open_meteo_weather, open_meteo_air_quality, nasa_power_daily]
   - city_id: lucknow
     city_name: Lucknow
     latitude: 26.8467
     longitude: 80.9462
     timezone: Asia/Kolkata
     climate_zone: north_inland
+    supported_languages: [Hindi, English]
+    expected_sources: [open_meteo_weather, open_meteo_air_quality, nasa_power_daily]
   - city_id: jaipur
     city_name: Jaipur
     latitude: 26.9124
     longitude: 75.7873
     timezone: Asia/Kolkata
     climate_zone: northwest_inland
+    supported_languages: [Hindi, English]
+    expected_sources: [open_meteo_weather, open_meteo_air_quality, nasa_power_daily]
