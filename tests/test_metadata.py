@@ -1,8 +1,9 @@
-from datetime import date
+from datetime import date, datetime, timezone
 
 import pytest
 
 from src.metadata import MetadataStore
+from src.models import QualityResult
 
 
 def test_metadata_run_lifecycle_and_latest_publication(tmp_path) -> None:
@@ -236,4 +237,86 @@ def test_invalid_summary_counts_records_instead_of_field_issues(tmp_path) -> Non
 
     summary = store.query("queries/latest_invalid_counts.sql", ("run-1",))
     assert summary[0]["invalid_records"] == 1
+    store.close()
+
+
+def test_operational_control_plane_unifies_source_state_and_atomic_finalization(tmp_path) -> None:
+    store = MetadataStore(tmp_path / "pipeline.db")
+    store.start_run("run-1", "rules-1", "members-1", 2025)
+    store.record_extraction_metrics("run-1", [{
+        "source": "weather", "city_id": "delhi", "duration_ms": 100, "attempts": 2,
+        "http_status": 200, "response_bytes": 500, "status": "success",
+    }])
+    store.record_readiness(
+        "run-1", "weather", "delhi", 10, "2026-06-13T00:00:00+00:00",
+        inserted=2, unchanged=8,
+    )
+    store.finalize_run(
+        "run-1", "success",
+        {"extracted": 10, "valid": 10, "invalid": 0, "published": 3},
+        [("weather", "delhi", "latest_successful_run", "run-1")],
+    )
+
+    source = store.connection.execute(
+        "SELECT * FROM source_pipeline_state WHERE run_id = 'run-1'"
+    ).fetchone()
+    assert source["attempts"] == 2
+    assert source["records_inserted"] == 2
+    assert source["resulting_watermark_value"] == "run-1"
+    assert source["watermark_advanced"] == 1
+    assert store.watermark("weather", "delhi", "latest_successful_run") == "run-1"
+    assert store.connection.execute(
+        "SELECT status FROM operational_run WHERE run_id = 'run-1'"
+    ).fetchone()[0] == "success"
+    store.close()
+
+
+def test_artifact_registry_tracks_reuse_and_compaction_lineage(tmp_path) -> None:
+    store = MetadataStore(tmp_path / "pipeline.db")
+    for run_id in ("run-1", "run-2"):
+        store.start_run(run_id, "rules-1", "members-1", 2025)
+    base = {
+        "source": "open_meteo_weather", "file_path": "/tmp/data.parquet",
+        "manifest_path": "/tmp/data.manifest.json", "content_hash": "content",
+        "file_checksum": "file", "row_count": 10,
+        "minimum_timestamp": "2026-01-01T00:00:00+00:00",
+        "maximum_timestamp": "2026-01-01T09:00:00+00:00",
+        "published_at": "2026-01-01T10:00:00+00:00",
+    }
+    store.record_raw_manifest({**base, "run_id": "run-1", "city_id": "delhi", "reused_from_run_id": None})
+    store.record_raw_manifest({
+        **base, "run_id": "run-2", "city_id": "delhi", "reused_from_run_id": "run-1",
+    })
+    store.record_raw_manifest({
+        **base, "run_id": "run-2", "city_id": "__all__", "reused_from_run_id": None,
+        "artifact_type": "compacted_source_snapshot",
+    })
+
+    relationships = {
+        row[0]
+        for row in store.connection.execute("SELECT relationship_type FROM artifact_dependency")
+    }
+    assert relationships == {"reused_from", "compacted_from"}
+    store.close()
+
+
+def test_quality_results_and_reference_metadata_are_normalized(tmp_path) -> None:
+    store = MetadataStore(tmp_path / "pipeline.db")
+    store.start_run("run-1", "rules-1", "members-1", 2025)
+    store.record_quality_results([
+        QualityResult(
+            run_id="run-1", check_name="non_empty", dataset="weather", status="pass",
+            details="rows=10", checked_at=datetime.now(timezone.utc),
+        )
+    ])
+    store.register_member_snapshot(
+        "snapshot-1", "v1", "config-1", tmp_path / "manifest.json", "checksum", 1, 2
+    )
+
+    assert store.connection.execute("SELECT count(*) FROM quality_check_result").fetchone()[0] == 1
+    reference = store.connection.execute("SELECT * FROM reference_snapshot").fetchone()
+    assert reference["snapshot_type"] == "member"
+    assert reference["primary_record_count"] == 1
+    assert reference["related_record_count"] == 2
+    store.maintain()
     store.close()

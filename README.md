@@ -136,6 +136,10 @@ SQLite at `data/metadata/pipeline.db` is the authoritative operational state sto
 source-city readiness, watermarks, invalid records, and published-dataset lineage. The dashboard selects the
 latest published run from SQLite; `latest_run.json` is no longer used.
 
+The normalized control-plane schema separates run identity from run metrics, combines each source-city
+execution with its resulting watermark, unifies artifact metadata and lineage, and persists quality results.
+See [`docs/operational-metadata.md`](docs/operational-metadata.md) for the model and migration boundary.
+
 Synthetic member dimensions are incrementally reconciled in SQLite with SCD Type 2 history, deactivation,
 condition-link change tracking, and separate outreach activity. A configured generation anchor date
 ensures identical configuration produces identical members across execution dates. The current dimensions

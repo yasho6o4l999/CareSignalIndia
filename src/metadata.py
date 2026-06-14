@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from src.config import ROOT
+from src.models import QualityResult
 from src.validation import ValidationIssue
 
 
@@ -32,6 +33,240 @@ class MemberSyncMetrics:
     changed_cities: frozenset[str]
 
 
+class RunRepository:
+    def __init__(self, connection: sqlite3.Connection) -> None:
+        self.connection = connection
+
+    def start(
+        self,
+        run_id: str,
+        started_at: str,
+        ruleset_version: str,
+        member_version: str,
+        baseline_end_year: int,
+        configuration_version: str | None,
+        member_snapshot_id: str | None,
+    ) -> None:
+        values = (
+            run_id, started_at, ruleset_version, member_version, baseline_end_year,
+            configuration_version, member_snapshot_id,
+        )
+        self.connection.execute(read_sql("mutations/start_operational_run.sql"), values)
+        self.connection.execute(read_sql("mutations/start_operational_run_metric.sql"), (run_id,))
+
+    def complete(
+        self,
+        run_id: str,
+        status: str,
+        counts: dict[str, int],
+        completed_at: str,
+        error_message: str | None,
+    ) -> None:
+        self.connection.execute(
+            read_sql("mutations/complete_operational_run.sql"),
+            (completed_at, status, completed_at, status, error_message, run_id),
+        )
+        self.connection.execute(
+            read_sql("mutations/complete_operational_run_metric.sql"),
+            (
+                counts["extracted"], counts["valid"], counts["invalid"], counts["published"],
+                counts.get("inserted", 0), counts.get("updated", 0),
+                counts.get("unchanged", 0), counts.get("rejected", counts["invalid"]), run_id,
+            ),
+        )
+
+
+class SourceStateRepository:
+    def __init__(self, connection: sqlite3.Connection) -> None:
+        self.connection = connection
+
+    def record_success(
+        self,
+        run_id: str,
+        source: str,
+        city_id: str,
+        now: str,
+        records: int,
+        latest: str | None,
+        inserted: int,
+        updated: int,
+        unchanged: int,
+        rejected: int,
+    ) -> None:
+        self.connection.execute(
+            read_sql("mutations/upsert_source_state_success.sql"),
+            (
+                run_id, source, city_id, now, now, records, records - rejected, rejected,
+                inserted, updated, unchanged, rejected, latest, run_id, source, city_id,
+            ),
+        )
+
+    def record_failure(self, run_id: str, source: str, city_id: str, now: str, message: str) -> None:
+        self.connection.execute(
+            read_sql("mutations/upsert_source_state_failure.sql"),
+            (run_id, source, city_id, now, message, run_id, source, city_id),
+        )
+
+    def advance_watermark(
+        self, run_id: str, source: str, city_id: str, watermark_type: str, value: str
+    ) -> None:
+        self.connection.execute(
+            read_sql("mutations/advance_source_state_watermark.sql"),
+            (watermark_type, source, city_id, watermark_type, value, run_id, source, city_id),
+        )
+
+    def watermark(self, source: str, city_id: str, watermark_type: str) -> str | None:
+        row = self.connection.execute(
+            read_sql("queries/current_source_watermark.sql"), (source, city_id, watermark_type)
+        ).fetchone()
+        return row["watermark_value"] if row else None
+
+
+class ArtifactRepository:
+    def __init__(self, connection: sqlite3.Connection) -> None:
+        self.connection = connection
+
+    @staticmethod
+    def raw_id(run_id: str, source: str, city_id: str) -> str:
+        return f"raw:{run_id}:{source}:{city_id}"
+
+    def record_raw(self, manifest: dict) -> None:
+        artifact_id = self.raw_id(manifest["run_id"], manifest["source"], manifest["city_id"])
+        self.connection.execute(
+            read_sql("mutations/record_data_artifact.sql"),
+            (
+                artifact_id, manifest["run_id"], manifest.get("artifact_type", "city_snapshot"),
+                manifest["source"], manifest["source"], manifest["city_id"],
+                manifest["file_path"], manifest["manifest_path"], manifest["content_hash"],
+                manifest["file_checksum"], manifest.get("schema_version"),
+                manifest.get("schema_fingerprint"), manifest["row_count"],
+                manifest.get("file_size_bytes"), manifest.get("row_group_count"),
+                manifest.get("input_file_count"), manifest["minimum_timestamp"],
+                manifest["maximum_timestamp"], manifest["published_at"],
+            ),
+        )
+        reused_from = manifest.get("reused_from_run_id")
+        if reused_from:
+            self.connection.execute(
+                read_sql("mutations/record_artifact_dependency.sql"),
+                (
+                    self.raw_id(reused_from, manifest["source"], manifest["city_id"]),
+                    artifact_id, "reused_from", manifest["published_at"],
+                ),
+            )
+        if manifest.get("artifact_type") == "compacted_source_snapshot":
+            parents = self.connection.execute(
+                read_sql("queries/source_run_city_artifacts.sql"),
+                (manifest["run_id"], manifest["source"]),
+            ).fetchall()
+            self.connection.executemany(
+                read_sql("mutations/record_artifact_dependency.sql"),
+                [
+                    (row["artifact_id"], artifact_id, "compacted_from", manifest["published_at"])
+                    for row in parents
+                ],
+            )
+
+    def record_processed(self, run_id: str, name: str, path: Path, count: int, published_at: str) -> None:
+        artifact_id = f"processed:{run_id}:{name}"
+        self.connection.execute(
+            read_sql("mutations/record_data_artifact.sql"),
+            (
+                artifact_id, run_id, "processed_dataset", name, None, None,
+                str(path), None, None, None, None, None, count,
+                path.stat().st_size if path.exists() else None,
+                None, None, None, None, published_at,
+            ),
+        )
+        upstream = self.connection.execute(
+            read_sql("queries/run_upstream_artifacts.sql"), (run_id, run_id)
+        ).fetchall()
+        self.connection.executemany(
+            read_sql("mutations/record_artifact_dependency.sql"),
+            [
+                (row["artifact_id"], artifact_id, "derived_from", published_at)
+                for row in upstream
+            ],
+        )
+
+    def record_reference(
+        self,
+        snapshot_id: str,
+        manifest_path: Path,
+        checksum: str,
+        count: int,
+        published_at: str,
+    ) -> None:
+        self.connection.execute(
+            read_sql("mutations/record_data_artifact.sql"),
+            (
+                f"reference:member:{snapshot_id}", None, "reference_snapshot", snapshot_id,
+                None, None, str(manifest_path), str(manifest_path), None, checksum, None, None,
+                count, manifest_path.stat().st_size if manifest_path.exists() else None,
+                None, None, None, None, published_at,
+            ),
+        )
+
+
+class QualityRepository:
+    def __init__(self, connection: sqlite3.Connection) -> None:
+        self.connection = connection
+
+    def record_results(self, results: list[QualityResult]) -> None:
+        self.connection.executemany(
+            read_sql("mutations/record_quality_result.sql"),
+            [
+                (
+                    result.run_id, result.check_name, result.dataset, result.status,
+                    result.details, result.checked_at.isoformat(),
+                )
+                for result in results
+            ],
+        )
+
+
+class MemberRepository:
+    def __init__(self, connection: sqlite3.Connection) -> None:
+        self.connection = connection
+
+    def record_snapshot(
+        self,
+        snapshot_id: str,
+        generator_version: str,
+        configuration_version: str,
+        manifest_path: Path,
+        checksum: str,
+        member_count: int,
+        condition_count: int,
+        created_at: str,
+    ) -> None:
+        self.connection.execute(
+            read_sql("mutations/register_reference_snapshot.sql"),
+            (
+                snapshot_id, generator_version, configuration_version, str(manifest_path),
+                checksum, member_count, condition_count, created_at,
+            ),
+        )
+
+    def protected_snapshot_ids(self) -> set[str]:
+        return {
+            row["member_snapshot_id"]
+            for row in self.connection.execute(
+                read_sql("queries/protected_member_snapshots.sql")
+            ).fetchall()
+        }
+
+    def latest_snapshot_id(self) -> str | None:
+        row = self.connection.execute(read_sql("queries/latest_member_snapshot.sql")).fetchone()
+        return row["snapshot_id"] if row else None
+
+    def delete_snapshot_records(self, snapshot_ids: list[str]) -> None:
+        self.connection.executemany(
+            read_sql("mutations/delete_reference_snapshot.sql"),
+            [(snapshot_id,) for snapshot_id in snapshot_ids],
+        )
+
+
 class MetadataStore:
     def __init__(self, path: Path = DATABASE_PATH) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -39,6 +274,11 @@ class MetadataStore:
         self.connection.row_factory = sqlite3.Row
         self.connection.executescript(read_sql("session_pragmas.sql"))
         self._apply_migrations()
+        self.runs = RunRepository(self.connection)
+        self.sources = SourceStateRepository(self.connection)
+        self.artifacts = ArtifactRepository(self.connection)
+        self.quality = QualityRepository(self.connection)
+        self.members = MemberRepository(self.connection)
 
     def _apply_migrations(self) -> None:
         self.connection.executescript(read_sql("migrations/000_schema_migrations.sql"))
@@ -66,6 +306,9 @@ class MetadataStore:
     def close(self) -> None:
         self.connection.close()
 
+    def maintain(self) -> None:
+        self.connection.executescript(read_sql("maintenance.sql"))
+
     def start_run(
         self,
         run_id: str,
@@ -75,13 +318,18 @@ class MetadataStore:
         configuration_version: str | None = None,
         member_snapshot_id: str | None = None,
     ) -> None:
+        started_at = utc_now()
         with self.connection:
             self.connection.execute(
                 read_sql("mutations/start_run.sql"),
                 (
-                    run_id, utc_now(), ruleset_version, member_version, baseline_end_year,
+                    run_id, started_at, ruleset_version, member_version, baseline_end_year,
                     configuration_version, member_snapshot_id,
                 ),
+            )
+            self.runs.start(
+                run_id, started_at, ruleset_version, member_version, baseline_end_year,
+                configuration_version, member_snapshot_id,
             )
 
     @staticmethod
@@ -206,6 +454,13 @@ class MetadataStore:
                     condition_changes, json.dumps(sorted(changed_cities)),
                 ),
             )
+            self.connection.execute(
+                read_sql("mutations/record_reference_sync.sql"),
+                (
+                    sync_id, started_at, utc_now(), inserted, updated, deactivated, unchanged,
+                    condition_changes, json.dumps(sorted(changed_cities)),
+                ),
+            )
         return MemberSyncMetrics(
             inserted=inserted,
             updated=updated,
@@ -225,13 +480,21 @@ class MetadataStore:
         member_count: int,
         condition_count: int,
     ) -> None:
+        created_at = utc_now()
         with self.connection:
             self.connection.execute(
                 read_sql("mutations/register_member_snapshot.sql"),
                 (
                     snapshot_id, generator_version, configuration_version, str(manifest_path),
-                    checksum, member_count, condition_count, utc_now(),
+                    checksum, member_count, condition_count, created_at,
                 ),
+            )
+            self.members.record_snapshot(
+                snapshot_id, generator_version, configuration_version, manifest_path,
+                checksum, member_count, condition_count, created_at,
+            )
+            self.artifacts.record_reference(
+                snapshot_id, manifest_path, checksum, member_count, created_at
             )
 
     def current_members(self) -> list[dict]:
@@ -253,16 +516,10 @@ class MetadataStore:
         ]
 
     def protected_member_snapshot_ids(self) -> set[str]:
-        return {
-            row["member_snapshot_id"]
-            for row in self.connection.execute(
-                read_sql("queries/protected_member_snapshots.sql")
-            ).fetchall()
-        }
+        return self.members.protected_snapshot_ids()
 
     def latest_member_snapshot_id(self) -> str | None:
-        row = self.connection.execute(read_sql("queries/latest_member_snapshot.sql")).fetchone()
-        return row["snapshot_id"] if row else None
+        return self.members.latest_snapshot_id()
 
     def delete_member_snapshot_records(self, snapshot_ids: list[str]) -> None:
         with self.connection:
@@ -270,6 +527,7 @@ class MetadataStore:
                 read_sql("mutations/delete_member_snapshot.sql"),
                 [(snapshot_id,) for snapshot_id in snapshot_ids],
             )
+            self.members.delete_snapshot_records(snapshot_ids)
 
     def complete_run(self, run_id: str, status: str, counts: dict[str, int], error_message: str | None = None) -> None:
         now = utc_now()
@@ -283,6 +541,7 @@ class MetadataStore:
                     error_message, run_id,
                 ),
             )
+            self.runs.complete(run_id, status, counts, now, error_message)
 
     def record_readiness(
         self,
@@ -304,6 +563,9 @@ class MetadataStore:
                     run_id, source, city_id, now, now, records, records - rejected, rejected,
                     inserted, updated, unchanged, rejected, latest,
                 ),
+            )
+            self.sources.record_success(
+                run_id, source, city_id, now, records, latest, inserted, updated, unchanged, rejected
             )
 
     def record_extraction_metrics(self, run_id: str, metrics: list[dict]) -> None:
@@ -335,6 +597,7 @@ class MetadataStore:
                     manifest.get("input_file_count"),
                 ),
             )
+            self.artifacts.record_raw(manifest)
 
     def latest_raw_manifest(self, source: str, city_id: str) -> sqlite3.Row | None:
         return self.connection.execute(
@@ -342,11 +605,13 @@ class MetadataStore:
         ).fetchone()
 
     def record_failure(self, run_id: str, source: str, city_id: str, message: str) -> None:
+        now = utc_now()
         with self.connection:
             self.connection.execute(
                 read_sql("mutations/record_failure.sql"),
-                (run_id, source, city_id, utc_now(), message),
+                (run_id, source, city_id, now, message),
             )
+            self.sources.record_failure(run_id, source, city_id, now, message)
 
     def quarantine(
         self,
@@ -360,13 +625,22 @@ class MetadataStore:
         invalid_value: Any = None,
         severity: str = "fatal",
     ) -> None:
+        quarantined_at = utc_now()
+        record_payload = json.dumps(payload, default=str)
+        invalid_json = json.dumps(invalid_value, default=str)
         with self.connection:
             self.connection.execute(
                 read_sql("mutations/quarantine_record.sql"),
                 (
                     run_id, source, city_id, type(error).__name__, field_name, str(error),
-                    json.dumps(payload, default=str), utc_now(), natural_key,
-                    json.dumps(invalid_value, default=str), severity, "v1",
+                    record_payload, quarantined_at, natural_key, invalid_json, severity, "v1",
+                ),
+            )
+            self.connection.execute(
+                read_sql("mutations/record_validation_issue.sql"),
+                (
+                    run_id, source, city_id, severity, natural_key, field_name, type(error).__name__,
+                    invalid_json, str(error), record_payload, "v1", quarantined_at,
                 ),
             )
 
@@ -377,26 +651,42 @@ class MetadataStore:
         city_id: str,
         issues: list[ValidationIssue],
     ) -> None:
+        quarantined_at = utc_now()
+        values = [
+            (
+                run_id, source, city_id, issue.error_type, issue.field_name,
+                issue.error_message, json.dumps(issue.record_payload, default=str), quarantined_at,
+                issue.natural_key, json.dumps(issue.invalid_value, default=str),
+                issue.severity, "v1",
+            )
+            for issue in issues
+        ]
         with self.connection:
             self.connection.executemany(
                 read_sql("mutations/quarantine_record.sql"),
+                values,
+            )
+            self.connection.executemany(
+                read_sql("mutations/record_validation_issue.sql"),
                 [
                     (
-                        run_id, source, city_id, issue.error_type, issue.field_name,
-                        issue.error_message, json.dumps(issue.record_payload, default=str), utc_now(),
-                        issue.natural_key, json.dumps(issue.invalid_value, default=str),
-                        issue.severity, "v1",
+                        run_id, source, city_id, issue.severity, issue.natural_key,
+                        issue.field_name, issue.error_type, json.dumps(issue.invalid_value, default=str),
+                        issue.error_message, json.dumps(issue.record_payload, default=str),
+                        "v1", quarantined_at,
                     )
                     for issue in issues
                 ],
             )
 
     def record_dataset(self, run_id: str, name: str, path: Path, count: int) -> None:
+        published_at = utc_now()
         with self.connection:
             self.connection.execute(
                 read_sql("mutations/record_dataset.sql"),
-                (run_id, name, str(path), count, utc_now()),
+                (run_id, name, str(path), count, published_at),
             )
+            self.artifacts.record_processed(run_id, name, path, count, published_at)
 
     def upsert_watermark(self, run_id: str, source: str, city_id: str, watermark_type: str, value: str) -> None:
         with self.connection:
@@ -404,13 +694,41 @@ class MetadataStore:
                 read_sql("mutations/upsert_watermark.sql"),
                 (source, city_id, watermark_type, value, run_id, utc_now()),
             )
+            self.sources.advance_watermark(run_id, source, city_id, watermark_type, value)
 
     def watermark(self, source: str, city_id: str, watermark_type: str) -> str | None:
-        row = self.connection.execute(
-            read_sql("queries/get_watermark.sql"),
-            (source, city_id, watermark_type),
-        ).fetchone()
-        return row["watermark_value"] if row else None
+        return self.sources.watermark(source, city_id, watermark_type)
+
+    def record_quality_results(self, results: list[QualityResult]) -> None:
+        with self.connection:
+            self.quality.record_results(results)
+
+    def finalize_run(
+        self,
+        run_id: str,
+        status: str,
+        counts: dict[str, int],
+        watermarks: list[tuple[str, str, str, str]],
+        error_message: str | None = None,
+    ) -> None:
+        now = utc_now()
+        with self.connection:
+            for source, city_id, watermark_type, value in watermarks:
+                self.connection.execute(
+                    read_sql("mutations/upsert_watermark.sql"),
+                    (source, city_id, watermark_type, value, run_id, now),
+                )
+                self.sources.advance_watermark(run_id, source, city_id, watermark_type, value)
+            self.connection.execute(
+                read_sql("mutations/complete_run.sql"),
+                (
+                    now, status, now, status, counts["extracted"], counts["valid"], counts["invalid"],
+                    counts["published"], counts.get("inserted", 0), counts.get("updated", 0),
+                    counts.get("unchanged", 0), counts.get("rejected", counts["invalid"]),
+                    error_message, run_id,
+                ),
+            )
+            self.runs.complete(run_id, status, counts, now, error_message)
 
     def latest_published_run(self) -> sqlite3.Row | None:
         return self.connection.execute(read_sql("queries/latest_published_run.sql")).fetchone()

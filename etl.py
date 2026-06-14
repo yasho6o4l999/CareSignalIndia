@@ -429,6 +429,7 @@ async def main() -> None:
             raise RuntimeError(f"Publication readiness failed: {readiness.summary}")
 
         quality_results = run_quality_checks(run_id, str(ROOT / "data/raw"), len(readiness.complete_cities))
+        metadata.record_quality_results(quality_results)
         write_models(staging / "quality_results.parquet", quality_results)
         if any(result.status == "fail" for result in quality_results):
             raise RuntimeError("Fatal data quality failure")
@@ -449,13 +450,18 @@ async def main() -> None:
         )
         verify_publication(staging)
         counts["published"] = publish_run(run_id, staging, metadata)
-        for source, successful_cities in extraction.successful_cities_by_source.items():
-            for city_id in successful_cities:
-                watermark_type = "baseline_end_year" if source == "nasa_power_daily" else "latest_successful_run"
-                value = str(baseline_end_year) if source == "nasa_power_daily" else run_id
-                metadata.upsert_watermark(run_id, source, city_id, watermark_type, value)
+        watermarks = [
+            (
+                source,
+                city_id,
+                "baseline_end_year" if source == "nasa_power_daily" else "latest_successful_run",
+                str(baseline_end_year) if source == "nasa_power_daily" else run_id,
+            )
+            for source, successful_cities in extraction.successful_cities_by_source.items()
+            for city_id in successful_cities
+        ]
         run_message = readiness.summary if readiness.status == "partial_success" else None
-        metadata.complete_run(run_id, readiness.status, counts, run_message)
+        metadata.finalize_run(run_id, readiness.status, counts, watermarks, run_message)
         cleanup_raw_staging(ROOT / "data/raw", run_id)
         apply_retention()
         removed_snapshots = apply_member_snapshot_retention(
@@ -464,6 +470,7 @@ async def main() -> None:
             load_runtime_settings().synthetic_members.snapshot_retention_count,
         )
         metadata.delete_member_snapshot_records(removed_snapshots)
+        metadata.maintain()
         LOGGER.info("Completed run_id=%s status=%s %s", run_id, readiness.status, readiness.summary)
     except Exception as error:
         if staging.exists():

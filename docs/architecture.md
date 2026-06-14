@@ -120,7 +120,7 @@ flowchart TD
 | Parquet `data/raw/` | Forecast snapshots and historical source data | Columnar, compressed, and queryable directly by DuckDB |
 | Parquet `data/reference/` | Versioned compiled rules and validated member snapshots | Reusable, immutable analytical inputs for DuckDB |
 | Parquet `data/processed/` | Immutable published analytical runs | Dashboard never reads partially built output |
-| SQLite `data/metadata/pipeline.db` | Runs, current and SCD2 member dimensions, outreach activity, sync metrics, snapshot registry, readiness, watermarks, rejects, migrations, and lineage | Transactional operational state and member system of record |
+| SQLite `data/metadata/pipeline.db` | Normalized runs and metrics, unified source execution/state, artifact lineage, quality evidence, reference operations, and member dimensions | Transactional operational control plane and member system of record |
 | Quarantine in SQLite | Invalid source-city events and payload context | Makes failures visible without storing generated data in Git |
 
 ## Current Data Contracts
