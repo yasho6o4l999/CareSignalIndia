@@ -5,6 +5,7 @@ import shutil
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import pyarrow.parquet as pq
 import duckdb
@@ -421,6 +422,7 @@ async def main() -> None:
 
         publication_cities = staging / "publication_cities.parquet"
         write_rows(publication_cities, [{"city_id": city_id} for city_id in sorted(readiness.complete_cities)])
+        runtime_settings = load_runtime_settings()
         build_marts(
             ROOT,
             run_id,
@@ -429,6 +431,8 @@ async def main() -> None:
             rules_root=rules_root,
             publication_cities=publication_cities,
             cooldown_hours=load_outreach_policy().cooldown_hours,
+            decision_date=datetime.now(ZoneInfo(runtime_settings.decision_timezone)).date(),
+            decision_timezone=runtime_settings.decision_timezone,
         )
         verify_publication(staging)
         counts["published"] = publish_run(run_id, staging, metadata)

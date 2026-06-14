@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 import pyarrow.parquet as pq
 
@@ -88,7 +88,7 @@ def test_baseline_rule_uses_city_month_p95_as_effective_threshold(tmp_path) -> N
             "preferred_language": "English",
             "preferred_channel": "app",
             "outreach_consent": True,
-            "last_contact_date": start.date(),
+            "last_contact_date": date(2020, 1, 1),
         }
     ]
 
@@ -129,7 +129,7 @@ def test_baseline_rule_uses_city_month_p95_as_effective_threshold(tmp_path) -> N
         [{"member_id": "M-1", "condition": "diabetes"}],
     )
 
-    build_marts(tmp_path, run_id)
+    build_marts(tmp_path, run_id, decision_date=date(2026, 6, 14))
 
     triggers = pq.read_table(tmp_path / f"data/processed/run_id={run_id}/active_triggers.parquet").to_pylist()
     assert len(triggers) == 1
@@ -138,6 +138,15 @@ def test_baseline_rule_uses_city_month_p95_as_effective_threshold(tmp_path) -> N
     assert triggers[0]["effective_thresholds"][0] < 36.0
     assert triggers[0]["observed_persistence_hours"] == 3
     assert triggers[0]["severity"] == "critical"
+    assert triggers[0]["forecast_start_date"] == date(2026, 6, 15)
+    assert triggers[0]["days_until_start"] == 1
+    assert triggers[0]["action_timing"] == "upcoming_risk"
 
     outreach = pq.read_table(tmp_path / f"data/processed/run_id={run_id}/outreach_queue.parquet").to_pylist()
-    assert outreach == []
+    assert len(outreach) == 1
+    assert outreach[0]["action_timing"] == "upcoming_risk"
+    assert outreach[0]["days_until_start"] == 1
+    alerts = pq.read_table(
+        tmp_path / f"data/processed/run_id={run_id}/stakeholder_alerts.parquet"
+    ).to_pylist()
+    assert alerts[0]["action_timing"] == "upcoming_risk"

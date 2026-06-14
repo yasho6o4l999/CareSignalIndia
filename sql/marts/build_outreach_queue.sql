@@ -30,6 +30,9 @@ COPY (
             t.observed_persistence_hours,
             t.window_start,
             t.window_end,
+            t.forecast_start_date,
+            t.days_until_start,
+            t.action_timing,
             t.trigger_explanation,
             rc.relevance AS condition_relevance,
             CASE t.severity WHEN 'critical' THEN 4 WHEN 'high' THEN 3 WHEN 'medium' THEN 2 ELSE 1 END

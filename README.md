@@ -20,6 +20,7 @@ heat, coastal high-wind disruption, winter cold-plus-pollution exposure, and Jai
 - Deterministic synthetic members with consent controls
 - Machine-readable freshness, uniqueness, and non-empty quality checks
 - Configuration-driven regional rules with consecutive-hour persistence windows
+- Decision-timezone-aware separation of today's actions and upcoming forecast risks
 - Governed signal catalog, condition-relevance profiles, dynamic severity bands, and outreach cooldown
 - Environment overrides and deterministic configuration lineage stored with every pipeline run
 
@@ -63,6 +64,10 @@ Raw datasets are partitioned by `source` and `run_id`. DuckDB builds:
 - `stakeholder_alerts.parquet`
 - `quality_results.parquet`
 
+Each qualifying trigger is classified using `config/runtime.yml` as either `today_action` when its forecast
+window begins on the decision date, or `upcoming_risk` when it begins later. The dashboard presents these as
+separate operational queues.
+
 Regional detection rules are maintained in `config/regional_rules.yml`; governed descriptions, rationale,
 ownership, evidence links, condition profiles, and severity bands live in `config/signal_catalog.yml`.
 Each ETL run compiles them into normalized rule-definition, predicate, condition-relevance, and severity-band
@@ -91,7 +96,8 @@ Before deploying config changes, `python -m src.config_review impact --baseline 
 quantifies changed rule scope, cohorts, severity bands, policies, and estimated affected members. See
 [`docs/configuration.md`](docs/configuration.md) for the review workflow and CI behavior.
 
-`config/runtime.yml` owns deterministic synthetic-member settings, `config/publication_policy.yml` owns
+`config/runtime.yml` owns the decision timezone and deterministic synthetic-member settings,
+`config/publication_policy.yml` owns
 source-aware publication gates, `config/outreach_policy.yml` owns contact cooldown, and
 `config/environments/` contains environment-specific overrides selected by `CARESIGNAL_ENV`.
 

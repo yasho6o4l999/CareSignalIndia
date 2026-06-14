@@ -27,19 +27,18 @@ run_id = latest_run["run_id"]
 run_root = ROOT / f"data/processed/run_id={run_id}"
 connection = duckdb.connect()
 
-alerts = connection.execute(
-    render_sql(
-        "dashboard/stakeholder_alerts.sql",
-        stakeholder_alerts_path=run_root / "stakeholder_alerts.parquet",
-    )
-).fetch_arrow_table()
-
-queue_count = connection.execute(
-    render_sql(
-        "dashboard/outreach_member_count.sql",
-        outreach_queue_path=run_root / "outreach_queue.parquet",
-    )
-).fetchone()[0]
+alerts_sql = render_sql(
+    "dashboard/stakeholder_alerts.sql",
+    stakeholder_alerts_path=run_root / "stakeholder_alerts.parquet",
+)
+queue_count_sql = render_sql(
+    "dashboard/outreach_member_count.sql",
+    outreach_queue_path=run_root / "outreach_queue.parquet",
+)
+today_alerts = connection.execute(alerts_sql, ["today_action"]).fetch_arrow_table()
+upcoming_alerts = connection.execute(alerts_sql, ["upcoming_risk"]).fetch_arrow_table()
+today_queue_count = connection.execute(queue_count_sql, ["today_action"]).fetchone()[0]
+upcoming_queue_count = connection.execute(queue_count_sql, ["upcoming_risk"]).fetchone()[0]
 quality_failures = connection.execute(
     render_sql(
         "dashboard/quality_issue_count.sql",
@@ -47,10 +46,11 @@ quality_failures = connection.execute(
     )
 ).fetchone()[0]
 
-col1, col2, col3 = st.columns(3)
-col1.metric("Eligible members", queue_count)
-col2.metric("Active stakeholder alerts", alerts.num_rows)
-col3.metric("Quality warnings/failures", quality_failures)
+col1, col2, col3, col4 = st.columns(4)
+col1.metric("Members requiring action today", today_queue_count)
+col2.metric("Today's stakeholder alerts", today_alerts.num_rows)
+col3.metric("Upcoming risks", upcoming_alerts.num_rows)
+col4.metric("Quality warnings/failures", quality_failures)
 
 st.caption(
     f"Published run `{run_id}` · status `{latest_run['status']}` · "
@@ -58,20 +58,32 @@ st.caption(
     f"baseline through `{latest_run['baseline_end_year']}`"
 )
 
-st.subheader("Stakeholder alerts")
-st.dataframe(alerts, width="stretch")
-
-st.subheader("Member outreach queue")
 city = st.selectbox("City", ["All", *[city.city_id for city in load_cities()]])
 selected_city = None if city == "All" else city
-queue = connection.execute(
-    render_sql(
-        "dashboard/outreach_queue.sql",
-        outreach_queue_path=run_root / "outreach_queue.parquet",
-    ),
-    [selected_city, selected_city],
+queue_sql = render_sql(
+    "dashboard/outreach_queue.sql",
+    outreach_queue_path=run_root / "outreach_queue.parquet",
+)
+
+st.header("Today's Actions")
+st.caption("Forecast events beginning today that require immediate care-operations review.")
+st.subheader("Today's stakeholder alerts")
+st.dataframe(today_alerts, width="stretch")
+st.subheader("Today's member outreach queue")
+today_queue = connection.execute(
+    queue_sql, ["today_action", selected_city, selected_city]
 ).fetch_arrow_table()
-st.dataframe(queue, width="stretch")
+st.dataframe(today_queue, width="stretch")
+
+st.header("Upcoming Risks")
+st.caption("Qualifying forecast events beginning after today, shown for workload and outreach planning.")
+st.subheader("Upcoming stakeholder alerts")
+st.dataframe(upcoming_alerts, width="stretch")
+st.subheader("Upcoming member outreach queue")
+upcoming_queue = connection.execute(
+    queue_sql, ["upcoming_risk", selected_city, selected_city]
+).fetch_arrow_table()
+st.dataframe(upcoming_queue, width="stretch")
 
 st.subheader("City-specific historical baselines")
 baselines = connection.execute(

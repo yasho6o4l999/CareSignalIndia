@@ -169,6 +169,17 @@ COPY (
     )
     SELECT
         * EXCLUDE (severity_choice),
+        CAST(timezone('{decision_timezone}', window_start) AS DATE) AS forecast_start_date,
+        date_diff(
+            'day',
+            DATE '{decision_date}',
+            CAST(timezone('{decision_timezone}', window_start) AS DATE)
+        ) AS days_until_start,
+        CASE
+            WHEN CAST(timezone('{decision_timezone}', window_start) AS DATE) <= DATE '{decision_date}'
+                THEN 'today_action'
+            ELSE 'upcoming_risk'
+        END AS action_timing,
         concat(
             signal_name, ': ', predicate_explanation, ' for ', observed_persistence_hours,
             ' consecutive forecast hours in ', city_id, '.'

@@ -10,6 +10,7 @@ from src.config import (
     load_outreach_policy,
     load_publication_policy,
     load_rules,
+    load_runtime_settings,
 )
 
 
@@ -20,6 +21,7 @@ def test_configuration_is_valid() -> None:
     assert load_incremental_policy().forecast_correction_lookback_hours == 24
     assert load_extraction_policy().sources["open_meteo_weather"].maximum_concurrency == 4
     assert load_outreach_policy().cooldown_hours == 24
+    assert load_runtime_settings().decision_timezone == "Asia/Kolkata"
     assert configuration_version() == configuration_version()
 
 

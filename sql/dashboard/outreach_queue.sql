@@ -9,10 +9,13 @@ SELECT
     priority_score,
     preferred_channel,
     preferred_language,
+    forecast_start_date,
+    days_until_start,
     window_start,
     window_end,
     trigger_explanation
 FROM read_parquet('{outreach_queue_path}')
-WHERE (? IS NULL OR city_id = ?)
-ORDER BY priority_score DESC
+WHERE action_timing = ?
+  AND (? IS NULL OR city_id = ?)
+ORDER BY days_until_start, priority_score DESC
 LIMIT 500;

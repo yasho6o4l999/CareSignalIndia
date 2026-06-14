@@ -1,3 +1,4 @@
+decision_timezone: Asia/Kolkata
 synthetic_members:
   member_count: 5000
   seed: 20260612

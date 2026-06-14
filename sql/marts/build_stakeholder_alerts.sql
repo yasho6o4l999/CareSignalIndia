@@ -14,6 +14,9 @@ COPY (
         observed_persistence_hours,
         window_start,
         window_end,
+        forecast_start_date,
+        days_until_start,
+        action_timing,
         trigger_explanation,
         count(DISTINCT member_id) AS eligible_members,
         count(DISTINCT member_id) FILTER (WHERE priority_score >= 4) AS high_priority_members

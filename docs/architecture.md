@@ -79,9 +79,9 @@ flowchart TD
 |---|---|
 | `historical_baselines.parquet` | Defines what is locally unusual for each city and month |
 | `city_conditions.parquet` | Creates one combined environmental view per city and forecast hour |
-| `active_triggers.parquet` | Contains rule breaches that satisfy required persistence windows |
-| `outreach_queue.parquet` | Identifies consented members relevant to active triggers |
-| `stakeholder_alerts.parquet` | Summarizes care-operations workload by alert |
+| `active_triggers.parquet` | Contains persisted rule breaches classified as today's actions or upcoming risks |
+| `outreach_queue.parquet` | Identifies consented members relevant to triggers, separated by action timing |
+| `stakeholder_alerts.parquet` | Summarizes today's immediate workload and later planning workload |
 
 ## Pipeline Control Architecture
 

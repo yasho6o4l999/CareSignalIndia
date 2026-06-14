@@ -4,6 +4,7 @@ import os
 from datetime import date
 from pathlib import Path
 from typing import Any, Literal
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import yaml
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -119,8 +120,18 @@ class SyntheticMemberPolicy(BaseModel):
 
 
 class RuntimeSettings(BaseModel):
+    decision_timezone: str
     enabled_cities: list[str] | None = None
     synthetic_members: SyntheticMemberPolicy
+
+    @field_validator("decision_timezone")
+    @classmethod
+    def valid_decision_timezone(cls, value: str) -> str:
+        try:
+            ZoneInfo(value)
+        except ZoneInfoNotFoundError as error:
+            raise ValueError("decision_timezone must be a valid IANA timezone") from error
+        return value
 
 
 class SourceReference(BaseModel):

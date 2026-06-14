@@ -14,6 +14,8 @@ def build_marts(
     rules_root: Path | None = None,
     publication_cities: Path | None = None,
     cooldown_hours: int = 0,
+    decision_date: date | None = None,
+    decision_timezone: str = "Asia/Kolkata",
 ) -> None:
     raw = root / "data/raw"
     processed = processed or root / "data/processed" / f"run_id={run_id}"
@@ -47,6 +49,7 @@ def build_marts(
     active_triggers = processed / "active_triggers.parquet"
     outreach_queue = processed / "outreach_queue.parquet"
     stakeholder_alerts = processed / "stakeholder_alerts.parquet"
+    decision_date = decision_date or date.today()
 
     connection.execute(
         render_sql(
@@ -73,6 +76,8 @@ def build_marts(
             rule_predicates_path=rule_predicates,
             rule_severity_bands_path=rule_severity_bands,
             historical_baselines_path=historical_baselines,
+            decision_date=decision_date.isoformat(),
+            decision_timezone=decision_timezone,
             output_path=active_triggers,
         )
     )

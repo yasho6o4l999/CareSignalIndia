@@ -1,4 +1,4 @@
 SELECT *
 FROM read_parquet('{stakeholder_alerts_path}')
-ORDER BY eligible_members DESC;
-
+WHERE action_timing = ?
+ORDER BY days_until_start, severity DESC, eligible_members DESC;
