@@ -1,1 +1,6 @@
 forecast_correction_lookback_hours: 24
+raw_compaction:
+  enabled: true
+  batch_rows: 65536
+  row_group_rows: 65536
+  compression: zstd

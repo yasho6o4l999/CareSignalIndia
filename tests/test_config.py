@@ -19,6 +19,8 @@ def test_configuration_is_valid() -> None:
     assert any(rule.rule_id == "delhi_winter_pm25" for rule in load_rules())
     assert load_publication_policy().minimum_complete_cities == 5
     assert load_incremental_policy().forecast_correction_lookback_hours == 24
+    assert load_incremental_policy().raw_compaction.enabled
+    assert load_incremental_policy().raw_compaction.row_group_rows == 65536
     assert load_extraction_policy().sources["open_meteo_weather"].maximum_concurrency == 4
     assert load_outreach_policy().cooldown_hours == 24
     assert load_runtime_settings().decision_timezone == "Asia/Kolkata"

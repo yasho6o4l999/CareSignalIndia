@@ -127,7 +127,7 @@ flowchart TD
 
 | Layer | Dataset or state | Natural key or version boundary |
 |---|---|---|
-| Forecast raw | Weather and air-quality city snapshots | `source + city_id + observed_at`, partitioned by `run_id` |
+| Forecast raw | Retryable city snapshots plus compacted source-run analytical artifacts | `source + city_id + observed_at`, partitioned by `run_id` |
 | Historical raw | NASA POWER daily records | `city_id + observed_date`, partitioned by baseline year, city, and year |
 | Regional rule reference | Definitions, predicates, and relevant conditions | Deterministic `ruleset_version` |
 | Member operational dimensions | Current members, SCD2 history, outreach activity, and member-condition bridge | SQLite primary and foreign keys |
@@ -170,6 +170,7 @@ next stage:
 - Async API calls with retries, timeouts, and bounded concurrency
 - Schema validation and source-city failure quarantine
 - Watermark-driven incremental forecast snapshots
+- Schema-governed raw manifests, abandoned-staging recovery, and source-level Parquet compaction
 - Parquet and DuckDB analytical processing
 - Config-driven regional and compound rules
 - Historical percentile baselines

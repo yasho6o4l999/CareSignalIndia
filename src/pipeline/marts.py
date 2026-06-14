@@ -22,8 +22,18 @@ def build_marts(
     processed.mkdir(parents=True, exist_ok=True)
     connection = duckdb.connect()
 
-    weather = raw / f"source=open_meteo_weather/run_id={run_id}" / "*.parquet"
-    air = raw / f"source=open_meteo_air_quality/run_id={run_id}" / "*.parquet"
+    weather_root = raw / f"source=open_meteo_weather/run_id={run_id}"
+    air_root = raw / f"source=open_meteo_air_quality/run_id={run_id}"
+    weather = (
+        weather_root / "compacted/data.parquet"
+        if (weather_root / "compacted/data.parquet").exists()
+        else weather_root / "*.parquet"
+    )
+    air = (
+        air_root / "compacted/data.parquet"
+        if (air_root / "compacted/data.parquet").exists()
+        else air_root / "*.parquet"
+    )
     members_root = members_root or raw / f"source=synthetic_members/run_id={run_id}"
     rules_root = rules_root or raw / f"source=regional_rules/run_id={run_id}"
     partitioned_members = members_root / "members"

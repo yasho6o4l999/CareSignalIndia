@@ -329,7 +329,10 @@ class MetadataStore:
                     manifest["file_path"], manifest["manifest_path"], manifest["content_hash"],
                     manifest["file_checksum"], manifest["row_count"], manifest["minimum_timestamp"],
                     manifest["maximum_timestamp"], manifest["reused_from_run_id"],
-                    manifest["published_at"],
+                    manifest["published_at"], manifest.get("artifact_type", "city_snapshot"),
+                    manifest.get("schema_version"), manifest.get("schema_fingerprint"),
+                    manifest.get("file_size_bytes"), manifest.get("row_group_count"),
+                    manifest.get("input_file_count"),
                 ),
             )
 

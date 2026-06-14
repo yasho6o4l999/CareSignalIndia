@@ -10,7 +10,7 @@ runtime inputs.
 | `signal_catalog.yml` | Governed signal name, description, category, owner, rationale, evidence, condition profile, and severity bands |
 | `condition_relevance.yml` | Reusable chronic-condition relevance profiles |
 | `publication_policy.yml` | Required sources, freshness limits, minimum coverage, and mandatory cities |
-| `incremental_policy.yml` | Forecast correction lookback |
+| `incremental_policy.yml` | Forecast correction lookback plus raw compaction batch, row-group, and compression settings |
 | `extraction_policy.yml` | Source-specific concurrency, timeouts, retries, response contracts, and record-acceptance thresholds |
 | `outreach_policy.yml` | Contact cooldown and future severity-escalation behavior |
 | `runtime.yml` | Decision timezone, synthetic-member count, seed, and regional distribution |

@@ -1,10 +1,19 @@
 from datetime import datetime, timedelta, timezone
+import shutil
 
 import pyarrow.parquet as pq
+import pytest
 
+from src.config import RawCompactionPolicy
 from src.incremental import merge_forecast_snapshot
 from src.models import WeatherRecord
-from src.raw import publish_forecast_snapshot
+from src.raw import (
+    cleanup_raw_staging,
+    compact_forecast_run,
+    publish_forecast_snapshot,
+    recover_raw_staging,
+    verify_raw_manifest,
+)
 from src.storage import write_models
 
 
@@ -104,5 +113,84 @@ def test_raw_publication_reuses_identical_content_and_writes_manifest(tmp_path) 
     assert metrics.unchanged == 1
     assert first_manifest["content_hash"] == second_manifest["content_hash"]
     assert second_manifest["reused_from_run_id"] == "run-1"
+    assert second_manifest["manifest_version"] == "v2"
+    assert second_manifest["schema_version"] == "v1"
+    assert second_manifest["schema_fingerprint"]
+    assert second_manifest["column_statistics"]
     assert second.with_suffix(".manifest.json").exists()
     assert first.stat().st_ino == second.stat().st_ino
+
+
+def test_raw_manifest_rejects_incompatible_schema_fingerprint(tmp_path) -> None:
+    observed_at = datetime(2099, 1, 1, tzinfo=timezone.utc)
+    path = tmp_path / "data/raw/source=open_meteo_weather/run_id=run-1/delhi.parquet"
+    _, manifest = publish_forecast_snapshot(
+        "open_meteo_weather", "delhi", "run-1",
+        [weather_record(observed_at, 30, observed_at)], None, None, path,
+        observed_at - timedelta(hours=24),
+    )
+    incompatible_previous = {**manifest, "schema_fingerprint": "different"}
+
+    with pytest.raises(ValueError, match="Incompatible schema change"):
+        verify_raw_manifest(path, manifest, incompatible_previous)
+
+
+def test_compaction_streams_city_files_into_one_source_artifact(tmp_path) -> None:
+    run_id = "run-1"
+    observed_at = datetime(2099, 1, 1, tzinfo=timezone.utc)
+    run_root = tmp_path / f"source=open_meteo_weather/run_id={run_id}"
+    for city_id in ("delhi", "mumbai"):
+        records = [
+            weather_record(observed_at + timedelta(hours=offset), 30 + offset, observed_at)
+            .model_copy(update={"city_id": city_id})
+            for offset in range(2)
+        ]
+        write_models(run_root / f"{city_id}.parquet", records)
+
+    manifest = compact_forecast_run(
+        tmp_path,
+        "open_meteo_weather",
+        run_id,
+        RawCompactionPolicy(batch_rows=1000, row_group_rows=1000),
+    )
+    compacted = run_root / "compacted/data.parquet"
+
+    assert compacted.exists()
+    assert manifest["artifact_type"] == "compacted_source_snapshot"
+    assert manifest["input_file_count"] == 2
+    assert manifest["row_count"] == 4
+    assert manifest["row_group_count"] == 1
+    assert pq.ParquetFile(compacted).metadata.num_rows == 4
+
+    replay_root = tmp_path / "source=open_meteo_weather/run_id=run-2"
+    replay_root.mkdir(parents=True)
+    for input_path in run_root.glob("*.parquet"):
+        shutil.copy2(input_path, replay_root / input_path.name)
+    replay_manifest = compact_forecast_run(
+        tmp_path,
+        "open_meteo_weather",
+        "run-2",
+        RawCompactionPolicy(batch_rows=1000, row_group_rows=1000),
+    )
+    replay_compacted = replay_root / "compacted/data.parquet"
+
+    assert replay_manifest["reused_from_run_id"] == "run-1"
+    assert compacted.stat().st_ino == replay_compacted.stat().st_ino
+
+
+def test_raw_staging_recovery_preserves_active_run(tmp_path) -> None:
+    stale = tmp_path / ".staging/source=open_meteo_weather/run_id=stale"
+    active = tmp_path / ".staging/source=open_meteo_weather/run_id=active"
+    stale.mkdir(parents=True)
+    active.mkdir(parents=True)
+
+    removed = recover_raw_staging(tmp_path, "active")
+
+    assert removed == [stale]
+    assert not stale.exists()
+    assert active.exists()
+
+    cleaned = cleanup_raw_staging(tmp_path, "active")
+
+    assert cleaned == [active]
+    assert not (tmp_path / ".staging").exists()

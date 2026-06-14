@@ -13,7 +13,7 @@ heat, coastal high-wind disruption, winter cold-plus-pollution exposure, and Jai
 - Source-specific concurrency, timeout, retry, and response-contract policies
 - Pydantic schema and accepted-range validation
 - Per-record salvage with structured field-level quarantine and configurable valid-ratio gates
-- Partitioned, ZSTD-compressed Parquet storage
+- Partitioned, manifested Parquet storage with source-level compaction for analytical reads
 - DuckDB transformations directly over Parquet
 - Predicate pushdown in dashboard queries
 - Five-year NASA POWER historical baselines with city/month p90 and p95 thresholds
@@ -173,9 +173,11 @@ duration, attempts, response size, status, and response code per source-city req
 errors are not retried, while transient errors use bounded exponential backoff and respect `Retry-After`.
 
 Validated forecast outputs publish through source-city staging paths. Each raw Parquet file has a manifest
-containing its semantic content hash, checksum, row count, timestamp range, and reuse lineage. When merged
-environmental content is unchanged, the new run hard-links the previous file rather than storing duplicate
-bytes while still retaining a complete immutable run view.
+containing schema governance, semantic content hash, checksum, column statistics, row-group details, timestamp
+range, and reuse lineage. When merged environmental content is unchanged, the new run hard-links the previous
+file rather than storing duplicate bytes while still retaining a complete immutable run view. Source-city
+files are then streamed into one compacted file per forecast source and run; quality checks and marts read
+the compacted artifacts to avoid DuckDB small-file overhead.
 
 Synthetic member data contains no names, contact details, exact addresses, or real identifiers. Outreach priority is an operational demonstration, not a clinical risk score.
 

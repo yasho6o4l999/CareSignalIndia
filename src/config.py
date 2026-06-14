@@ -88,8 +88,16 @@ class PublicationPolicy(BaseModel):
         return [source for source, policy in self.sources.items() if policy.required]
 
 
+class RawCompactionPolicy(BaseModel):
+    enabled: bool = True
+    batch_rows: int = Field(default=65536, ge=1000, le=1_000_000)
+    row_group_rows: int = Field(default=65536, ge=1000, le=1_000_000)
+    compression: Literal["zstd", "snappy"] = "zstd"
+
+
 class IncrementalPolicy(BaseModel):
     forecast_correction_lookback_hours: int = Field(ge=0, le=168)
+    raw_compaction: RawCompactionPolicy = RawCompactionPolicy()
 
 
 class ExtractionSourcePolicy(BaseModel):

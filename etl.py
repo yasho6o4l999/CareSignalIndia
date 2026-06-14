@@ -28,7 +28,12 @@ from src.metadata import MetadataStore
 from src.pipeline.marts import build_marts
 from src.quality import run_quality_checks
 from src.readiness import evaluate_readiness
-from src.raw import publish_forecast_snapshot
+from src.raw import (
+    cleanup_raw_staging,
+    compact_forecast_run,
+    publish_forecast_snapshot,
+    recover_raw_staging,
+)
 from src.reference import (
     MANIFEST_NAME,
     apply_member_snapshot_retention,
@@ -261,6 +266,11 @@ async def extract_forecasts(run_id: str, metadata: MetadataStore) -> ExtractionR
                 metrics.rejected + validation_rejections,
             )
             extraction.record_success(source, city.city_id, received_records, metrics, latest)
+        compacted_manifest = compact_forecast_run(
+            ROOT / "data/raw", source, run_id, load_incremental_policy().raw_compaction
+        )
+        if compacted_manifest and hasattr(metadata, "record_raw_manifest"):
+            metadata.record_raw_manifest(compacted_manifest)
     return extraction
 
 
@@ -394,6 +404,9 @@ async def main() -> None:
     staging = ROOT / f"data/processed/.staging-{run_id}"
     LOGGER.info("Starting run_id=%s", run_id)
     try:
+        recovered = recover_raw_staging(ROOT / "data/raw", run_id)
+        if recovered:
+            LOGGER.info("Removed %s abandoned raw staging directories", len(recovered))
         extraction = await extract_forecasts(run_id, metadata)
         extraction.merge(await ensure_history(run_id, metadata, baseline_end_year))
         counts["extracted"] = extraction.records
@@ -443,6 +456,7 @@ async def main() -> None:
                 metadata.upsert_watermark(run_id, source, city_id, watermark_type, value)
         run_message = readiness.summary if readiness.status == "partial_success" else None
         metadata.complete_run(run_id, readiness.status, counts, run_message)
+        cleanup_raw_staging(ROOT / "data/raw", run_id)
         apply_retention()
         removed_snapshots = apply_member_snapshot_retention(
             ROOT / "data/reference/member_snapshots",

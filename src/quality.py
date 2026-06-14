@@ -1,4 +1,5 @@
 from datetime import date, datetime, timedelta, timezone
+from pathlib import Path
 
 import duckdb
 
@@ -10,8 +11,19 @@ from src.sql import render_sql
 def run_quality_checks(run_id: str, raw_root: str, expected_city_count: int | None = None) -> list[QualityResult]:
     checked_at = datetime.now(timezone.utc)
     connection = duckdb.connect()
-    weather = f"{raw_root}/source=open_meteo_weather/run_id={run_id}/*.parquet"
-    air = f"{raw_root}/source=open_meteo_air_quality/run_id={run_id}/*.parquet"
+    raw = Path(raw_root)
+    weather_root = raw / f"source=open_meteo_weather/run_id={run_id}"
+    air_root = raw / f"source=open_meteo_air_quality/run_id={run_id}"
+    weather = (
+        weather_root / "compacted/data.parquet"
+        if (weather_root / "compacted/data.parquet").exists()
+        else weather_root / "*.parquet"
+    )
+    air = (
+        air_root / "compacted/data.parquet"
+        if (air_root / "compacted/data.parquet").exists()
+        else air_root / "*.parquet"
+    )
     checks: list[QualityResult] = []
     for dataset, path in [("weather", weather), ("air_quality", air)]:
         count, unique_count, latest = connection.execute(
