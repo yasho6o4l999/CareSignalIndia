@@ -176,6 +176,8 @@ def apply_member_snapshot_retention(
         reverse=True,
     )
     retained_latest = {path.name.removeprefix("snapshot_id=") for path in snapshots[:keep_latest]}
+    # Always protect the "latest" snapshot ID
+    protected_snapshot_ids = protected_snapshot_ids | {"latest"}
     removed: list[str] = []
     for path in snapshots:
         snapshot_id = path.name.removeprefix("snapshot_id=")
