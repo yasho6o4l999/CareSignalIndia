@@ -12,10 +12,8 @@ runtime inputs.
 | `publication_policy.yml` | Required sources, freshness limits, minimum coverage, and mandatory cities |
 | `incremental_policy.yml` | Forecast correction lookback plus raw compaction batch, row-group, and compression settings |
 | `extraction_policy.yml` | Source-specific concurrency, timeouts, retries, response contracts, and record-acceptance thresholds |
-| `outreach_policy.yml` | Contact cooldown and future severity-escalation behavior |
 | `quality_policy.yml` | Source coverage/freshness, join-loss, anomaly, and cross-mart integrity thresholds |
 | `runtime.yml` | Decision timezone, analytical-history retention, synthetic-member count, seed, and regional distribution |
-| `environments/*.yml` | Environment-specific overrides |
 
 `python -m src.validate_config` validates governed vocabularies, duplicate dimensions and predicates,
 cross-file city/profile/rule references, publication feasibility, and runtime city references before an ETL
@@ -26,12 +24,9 @@ carry a deterministic `ruleset_version`, while synthetic members carry a version
 settings and city weights.
 
 DuckDB calculates configured rolling metrics before evaluating predicates. Qualified persistence windows
-join to compiled severity bands and select the highest matching severity. The outreach queue applies
-condition relevance, age, consent, and the configured contact cooldown.
-
-`repeat_when_severity_increases` is intentionally not enforced in this prototype because there is no
-persisted outreach-action history. In production, that policy should compare the new trigger severity with
-the member's most recent action for the same signal before overriding the cooldown.
+join to compiled severity bands and select the highest matching severity. The prioritization queue applies
+condition relevance, age, and outreach consent. The assignment does not model completed outreach actions or
+contact-frequency policies.
 
 ## Pre-Deployment Review
 

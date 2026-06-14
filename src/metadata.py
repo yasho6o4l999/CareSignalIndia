@@ -1,8 +1,10 @@
 import json
 import sqlite3
 import hashlib
+import re
 from dataclasses import dataclass
-from datetime import date, datetime, timezone
+from datetime import datetime, timezone
+from functools import cache
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +24,30 @@ def utc_now() -> str:
 
 def read_sql(relative_path: str) -> str:
     return (SQLITE_ROOT / relative_path).read_text(encoding="utf-8")
+
+
+@cache
+def read_named_statement(directory: str, statement_name: str) -> str:
+    """Resolve one named statement from a consolidated SQLite bundle."""
+    matches = []
+    pattern = re.compile(
+        rf"^-- name: {re.escape(statement_name)}\s*$\n(.*?)(?=^-- name: |\Z)",
+        re.MULTILINE | re.DOTALL,
+    )
+    for path in (SQLITE_ROOT / directory).glob("*_statements.sql"):
+        if match := pattern.search(path.read_text(encoding="utf-8")):
+            matches.append(match.group(1).strip())
+    if len(matches) != 1:
+        raise ValueError(f"Expected one mutation named {statement_name!r}, found {len(matches)}")
+    return matches[0]
+
+
+def read_mutation(statement_name: str) -> str:
+    return read_named_statement("mutations", statement_name)
+
+
+def read_query(statement_name: str) -> str:
+    return read_named_statement("queries", statement_name)
 
 
 @dataclass(frozen=True)
@@ -52,8 +78,8 @@ class RunRepository:
             run_id, started_at, ruleset_version, member_version, baseline_end_year,
             configuration_version, member_snapshot_id,
         )
-        self.connection.execute(read_sql("mutations/start_operational_run.sql"), values)
-        self.connection.execute(read_sql("mutations/start_operational_run_metric.sql"), (run_id,))
+        self.connection.execute(read_mutation("start_operational_run"), values)
+        self.connection.execute(read_mutation("start_operational_run_metric"), (run_id,))
 
     def complete(
         self,
@@ -64,11 +90,11 @@ class RunRepository:
         error_message: str | None,
     ) -> None:
         self.connection.execute(
-            read_sql("mutations/complete_operational_run.sql"),
+            read_mutation("complete_operational_run"),
             (completed_at, status, completed_at, status, error_message, run_id),
         )
         self.connection.execute(
-            read_sql("mutations/complete_operational_run_metric.sql"),
+            read_mutation("complete_operational_run_metric"),
             (
                 counts["extracted"], counts["valid"], counts["invalid"], counts["published"],
                 counts.get("inserted", 0), counts.get("updated", 0),
@@ -95,7 +121,7 @@ class SourceStateRepository:
         rejected: int,
     ) -> None:
         self.connection.execute(
-            read_sql("mutations/upsert_source_state_success.sql"),
+            read_mutation("upsert_source_state_success"),
             (
                 run_id, source, city_id, now, now, records, records - rejected, rejected,
                 inserted, updated, unchanged, rejected, latest, run_id, source, city_id,
@@ -104,7 +130,7 @@ class SourceStateRepository:
 
     def record_failure(self, run_id: str, source: str, city_id: str, now: str, message: str) -> None:
         self.connection.execute(
-            read_sql("mutations/upsert_source_state_failure.sql"),
+            read_mutation("upsert_source_state_failure"),
             (run_id, source, city_id, now, message, run_id, source, city_id),
         )
 
@@ -112,13 +138,13 @@ class SourceStateRepository:
         self, run_id: str, source: str, city_id: str, watermark_type: str, value: str
     ) -> None:
         self.connection.execute(
-            read_sql("mutations/advance_source_state_watermark.sql"),
+            read_mutation("advance_source_state_watermark"),
             (watermark_type, source, city_id, watermark_type, value, run_id, source, city_id),
         )
 
     def watermark(self, source: str, city_id: str, watermark_type: str) -> str | None:
         row = self.connection.execute(
-            read_sql("queries/current_source_watermark.sql"), (source, city_id, watermark_type)
+            read_query("current_source_watermark"), (source, city_id, watermark_type)
         ).fetchone()
         return row["watermark_value"] if row else None
 
@@ -134,7 +160,7 @@ class ArtifactRepository:
     def record_raw(self, manifest: dict) -> None:
         artifact_id = self.raw_id(manifest["run_id"], manifest["source"], manifest["city_id"])
         self.connection.execute(
-            read_sql("mutations/record_data_artifact.sql"),
+            read_mutation("record_data_artifact"),
             (
                 artifact_id, manifest["run_id"], manifest.get("artifact_type", "city_snapshot"),
                 manifest["source"], manifest["source"], manifest["city_id"],
@@ -149,7 +175,7 @@ class ArtifactRepository:
         reused_from = manifest.get("reused_from_run_id")
         if reused_from:
             self.connection.execute(
-                read_sql("mutations/record_artifact_dependency.sql"),
+                read_mutation("record_artifact_dependency"),
                 (
                     self.raw_id(reused_from, manifest["source"], manifest["city_id"]),
                     artifact_id, "reused_from", manifest["published_at"],
@@ -157,11 +183,11 @@ class ArtifactRepository:
             )
         if manifest.get("artifact_type") == "compacted_source_snapshot":
             parents = self.connection.execute(
-                read_sql("queries/source_run_city_artifacts.sql"),
+                read_query("source_run_city_artifacts"),
                 (manifest["run_id"], manifest["source"]),
             ).fetchall()
             self.connection.executemany(
-                read_sql("mutations/record_artifact_dependency.sql"),
+                read_mutation("record_artifact_dependency"),
                 [
                     (row["artifact_id"], artifact_id, "compacted_from", manifest["published_at"])
                     for row in parents
@@ -171,7 +197,7 @@ class ArtifactRepository:
     def record_processed(self, run_id: str, name: str, path: Path, count: int, published_at: str) -> None:
         artifact_id = f"processed:{run_id}:{name}"
         self.connection.execute(
-            read_sql("mutations/record_data_artifact.sql"),
+            read_mutation("record_data_artifact"),
             (
                 artifact_id, run_id, "processed_dataset", name, None, None,
                 str(path), None, None, None, None, None, count,
@@ -180,10 +206,10 @@ class ArtifactRepository:
             ),
         )
         upstream = self.connection.execute(
-            read_sql("queries/run_upstream_artifacts.sql"), (run_id, run_id)
+            read_query("run_upstream_artifacts"), (run_id, run_id)
         ).fetchall()
         self.connection.executemany(
-            read_sql("mutations/record_artifact_dependency.sql"),
+            read_mutation("record_artifact_dependency"),
             [
                 (row["artifact_id"], artifact_id, "derived_from", published_at)
                 for row in upstream
@@ -199,7 +225,7 @@ class ArtifactRepository:
         published_at: str,
     ) -> None:
         self.connection.execute(
-            read_sql("mutations/record_data_artifact.sql"),
+            read_mutation("record_data_artifact"),
             (
                 f"reference:member:{snapshot_id}", None, "reference_snapshot", snapshot_id,
                 None, None, str(manifest_path), str(manifest_path), None, checksum, None, None,
@@ -215,7 +241,7 @@ class QualityRepository:
 
     def record_results(self, results: list[QualityResult]) -> None:
         self.connection.executemany(
-            read_sql("mutations/record_quality_result.sql"),
+            read_mutation("record_quality_result"),
             [
                 (
                     result.run_id, result.check_name, result.dataset, result.status,
@@ -227,7 +253,7 @@ class QualityRepository:
 
     def record_profiles(self, profiles: list[QualityProfile]) -> None:
         self.connection.executemany(
-            read_sql("mutations/record_quality_profile.sql"),
+            read_mutation("record_quality_profile"),
             [
                 (
                     profile.run_id, profile.stage, profile.dataset, profile.metric_name,
@@ -243,7 +269,7 @@ class QualityRepository:
         return {
             (row["dataset"], row["metric_name"]): (row["average_value"], row["sample_count"])
             for row in self.connection.execute(
-                read_sql("queries/previous_quality_profiles.sql"), (stage, run_id)
+                read_query("previous_quality_profiles"), (stage, run_id)
             ).fetchall()
         }
 
@@ -264,7 +290,7 @@ class MemberRepository:
         created_at: str,
     ) -> None:
         self.connection.execute(
-            read_sql("mutations/register_reference_snapshot.sql"),
+            read_mutation("register_reference_snapshot"),
             (
                 snapshot_id, generator_version, configuration_version, str(manifest_path),
                 checksum, member_count, condition_count, created_at,
@@ -275,17 +301,17 @@ class MemberRepository:
         return {
             row["member_snapshot_id"]
             for row in self.connection.execute(
-                read_sql("queries/protected_member_snapshots.sql")
+                read_query("protected_member_snapshots")
             ).fetchall()
         }
 
     def latest_snapshot_id(self) -> str | None:
-        row = self.connection.execute(read_sql("queries/latest_member_snapshot.sql")).fetchone()
+        row = self.connection.execute(read_query("latest_member_snapshot")).fetchone()
         return row["snapshot_id"] if row else None
 
     def delete_snapshot_records(self, snapshot_ids: list[str]) -> None:
         self.connection.executemany(
-            read_sql("mutations/delete_reference_snapshot.sql"),
+            read_mutation("delete_reference_snapshot"),
             [(snapshot_id,) for snapshot_id in snapshot_ids],
         )
 
@@ -304,15 +330,16 @@ class MetadataStore:
         self.members = MemberRepository(self.connection)
 
     def _apply_migrations(self) -> None:
+        # Ordered, recorded migrations make both fresh installs and upgrades deterministic.
         self.connection.executescript(read_sql("migrations/000_schema_migrations.sql"))
         applied = {
             row["version"]
-            for row in self.connection.execute(read_sql("queries/applied_migrations.sql")).fetchall()
+            for row in self.connection.execute(read_query("applied_migrations")).fetchall()
         }
         if "000_schema_migrations.sql" not in applied:
             with self.connection:
                 self.connection.execute(
-                    read_sql("mutations/record_migration.sql"),
+                    read_mutation("record_migration"),
                     ("000_schema_migrations.sql", utc_now()),
                 )
             applied.add("000_schema_migrations.sql")
@@ -322,7 +349,7 @@ class MetadataStore:
             with self.connection:
                 self.connection.executescript(path.read_text(encoding="utf-8"))
                 self.connection.execute(
-                    read_sql("mutations/record_migration.sql"),
+                    read_mutation("record_migration"),
                     (path.name, utc_now()),
                 )
 
@@ -343,13 +370,6 @@ class MetadataStore:
     ) -> None:
         started_at = utc_now()
         with self.connection:
-            self.connection.execute(
-                read_sql("mutations/start_run.sql"),
-                (
-                    run_id, started_at, ruleset_version, member_version, baseline_end_year,
-                    configuration_version, member_snapshot_id,
-                ),
-            )
             self.runs.start(
                 run_id, started_at, ruleset_version, member_version, baseline_end_year,
                 configuration_version, member_snapshot_id,
@@ -372,7 +392,6 @@ class MetadataStore:
         members: list[dict],
         conditions: list[dict],
         sync_id: str,
-        activity_source: str = "synthetic_generator",
     ) -> MemberSyncMetrics:
         started_at = utc_now()
         member_ids = [row["member_id"] for row in members]
@@ -385,20 +404,17 @@ class MetadataStore:
             )
         existing = {
             row["member_id"]: dict(row)
-            for row in self.connection.execute(read_sql("queries/member_state.sql")).fetchall()
+            for row in self.connection.execute(read_query("member_state")).fetchall()
         }
         existing_conditions: dict[str, set[str]] = {}
         for row in self.connection.execute(
-            read_sql("queries/all_member_conditions.sql")
+            read_query("all_member_conditions")
         ).fetchall():
             existing_conditions.setdefault(row["member_id"], set()).add(row["condition"])
         incoming = {row["member_id"]: row for row in members}
         incoming_conditions: dict[str, set[str]] = {}
         for row in conditions:
             incoming_conditions.setdefault(row["member_id"], set()).add(row["condition"])
-        existing_contacts = {
-            row["member_id"]: row["last_contact_date"] for row in self.current_members()
-        }
         inserted = updated = deactivated = unchanged = condition_changes = 0
         changed_cities: set[str] = set()
         now = utc_now()
@@ -413,44 +429,26 @@ class MetadataStore:
                 elif changed:
                     updated += 1
                     changed_cities.add(previous["city_id"])
-                    self.connection.execute(
-                        read_sql("mutations/close_member_history.sql"), (now, member_id)
-                    )
                 else:
                     unchanged += 1
                 if changed:
                     changed_cities.add(row["city_id"])
                     self.connection.execute(
-                        read_sql("mutations/upsert_member.sql"),
+                        read_mutation("upsert_member"),
                         (
                             member_id, row["city_id"], row["age_band"], row["preferred_language"],
                             row["preferred_channel"], int(row["outreach_consent"]),
-                            row["last_contact_date"].isoformat(), row["generator_version"], now,
-                            source_hash,
+                            row["generator_version"], now, source_hash,
                         ),
                     )
-                    self.connection.execute(
-                        read_sql("mutations/insert_member_history.sql"),
-                        (
-                            member_id, row["city_id"], row["age_band"], row["preferred_language"],
-                            row["preferred_channel"], int(row["outreach_consent"]),
-                            row["generator_version"], source_hash, now,
-                        ),
-                    )
-                self.connection.execute(
-                    read_sql("mutations/record_outreach_activity.sql"),
-                    (member_id, row["last_contact_date"].isoformat(), activity_source),
-                )
-                if existing_contacts.get(member_id) != row["last_contact_date"]:
-                    changed_cities.add(row["city_id"])
                 if existing_conditions.get(member_id, set()) != incoming_conditions.get(member_id, set()):
                     condition_changes += 1
                     changed_cities.add(row["city_id"])
                     self.connection.execute(
-                        read_sql("mutations/delete_member_conditions.sql"), (member_id,)
+                        read_mutation("delete_member_conditions"), (member_id,)
                     )
                     self.connection.executemany(
-                        read_sql("mutations/insert_member_condition.sql"),
+                        read_mutation("insert_member_condition"),
                         [
                             (member_id, condition)
                             for condition in sorted(incoming_conditions.get(member_id, set()))
@@ -462,23 +460,13 @@ class MetadataStore:
                     deactivated += 1
                     changed_cities.add(previous["city_id"])
                     self.connection.execute(
-                        read_sql("mutations/deactivate_member.sql"), (now, member_id)
+                        read_mutation("deactivate_member"), (now, member_id)
                     )
                     self.connection.execute(
-                        read_sql("mutations/close_member_history.sql"), (now, member_id)
-                    )
-                    self.connection.execute(
-                        read_sql("mutations/delete_member_conditions.sql"), (member_id,)
+                        read_mutation("delete_member_conditions"), (member_id,)
                     )
             self.connection.execute(
-                read_sql("mutations/record_member_sync.sql"),
-                (
-                    sync_id, started_at, utc_now(), inserted, updated, deactivated, unchanged,
-                    condition_changes, json.dumps(sorted(changed_cities)),
-                ),
-            )
-            self.connection.execute(
-                read_sql("mutations/record_reference_sync.sql"),
+                read_mutation("record_reference_sync"),
                 (
                     sync_id, started_at, utc_now(), inserted, updated, deactivated, unchanged,
                     condition_changes, json.dumps(sorted(changed_cities)),
@@ -505,13 +493,6 @@ class MetadataStore:
     ) -> None:
         created_at = utc_now()
         with self.connection:
-            self.connection.execute(
-                read_sql("mutations/register_member_snapshot.sql"),
-                (
-                    snapshot_id, generator_version, configuration_version, str(manifest_path),
-                    checksum, member_count, condition_count, created_at,
-                ),
-            )
             self.members.record_snapshot(
                 snapshot_id, generator_version, configuration_version, manifest_path,
                 checksum, member_count, condition_count, created_at,
@@ -525,16 +506,15 @@ class MetadataStore:
             {
                 **dict(row),
                 "outreach_consent": bool(row["outreach_consent"]),
-                "last_contact_date": date.fromisoformat(row["last_contact_date"]),
             }
-            for row in self.connection.execute(read_sql("queries/current_members.sql")).fetchall()
+            for row in self.connection.execute(read_query("current_members")).fetchall()
         ]
 
     def current_member_conditions(self) -> list[dict]:
         return [
             dict(row)
             for row in self.connection.execute(
-                read_sql("queries/current_member_conditions.sql")
+                read_query("current_member_conditions")
             ).fetchall()
         ]
 
@@ -546,24 +526,11 @@ class MetadataStore:
 
     def delete_member_snapshot_records(self, snapshot_ids: list[str]) -> None:
         with self.connection:
-            self.connection.executemany(
-                read_sql("mutations/delete_member_snapshot.sql"),
-                [(snapshot_id,) for snapshot_id in snapshot_ids],
-            )
             self.members.delete_snapshot_records(snapshot_ids)
 
     def complete_run(self, run_id: str, status: str, counts: dict[str, int], error_message: str | None = None) -> None:
         now = utc_now()
         with self.connection:
-            self.connection.execute(
-                read_sql("mutations/complete_run.sql"),
-                (
-                    now, status, now, status, counts["extracted"], counts["valid"], counts["invalid"],
-                    counts["published"], counts.get("inserted", 0), counts.get("updated", 0),
-                    counts.get("unchanged", 0), counts.get("rejected", counts["invalid"]),
-                    error_message, run_id,
-                ),
-            )
             self.runs.complete(run_id, status, counts, now, error_message)
 
     def record_readiness(
@@ -580,21 +547,14 @@ class MetadataStore:
     ) -> None:
         now = utc_now()
         with self.connection:
-            self.connection.execute(
-                read_sql("mutations/record_readiness.sql"),
-                (
-                    run_id, source, city_id, now, now, records, records - rejected, rejected,
-                    inserted, updated, unchanged, rejected, latest,
-                ),
-            )
             self.sources.record_success(
                 run_id, source, city_id, now, records, latest, inserted, updated, unchanged, rejected
             )
 
-    def record_extraction_metrics(self, run_id: str, metrics: list[dict]) -> None:
+    def record_extraction_request_metrics(self, run_id: str, metrics: list[dict]) -> None:
         with self.connection:
             self.connection.executemany(
-                read_sql("mutations/record_extraction_metric.sql"),
+                read_mutation("record_extraction_request_metric"),
                 [
                     (
                         run_id, metric["source"], metric["city_id"], metric["duration_ms"],
@@ -608,7 +568,7 @@ class MetadataStore:
     def start_stage(self, run_id: str, stage_name: str, input_records: int = 0) -> None:
         with self.connection:
             self.connection.execute(
-                read_sql("mutations/start_pipeline_stage.sql"),
+                read_mutation("start_pipeline_stage"),
                 (run_id, stage_name, utc_now(), input_records),
             )
 
@@ -623,39 +583,22 @@ class MetadataStore:
     ) -> None:
         with self.connection:
             self.connection.execute(
-                read_sql("mutations/complete_pipeline_stage.sql"),
+                read_mutation("complete_pipeline_stage"),
                 (utc_now(), status, duration_ms, output_records, error_message, run_id, stage_name),
             )
 
     def record_raw_manifest(self, manifest: dict) -> None:
         with self.connection:
-            self.connection.execute(
-                read_sql("mutations/record_raw_manifest.sql"),
-                (
-                    manifest["run_id"], manifest["source"], manifest["city_id"],
-                    manifest["file_path"], manifest["manifest_path"], manifest["content_hash"],
-                    manifest["file_checksum"], manifest["row_count"], manifest["minimum_timestamp"],
-                    manifest["maximum_timestamp"], manifest["reused_from_run_id"],
-                    manifest["published_at"], manifest.get("artifact_type", "city_snapshot"),
-                    manifest.get("schema_version"), manifest.get("schema_fingerprint"),
-                    manifest.get("file_size_bytes"), manifest.get("row_group_count"),
-                    manifest.get("input_file_count"),
-                ),
-            )
             self.artifacts.record_raw(manifest)
 
     def latest_raw_manifest(self, source: str, city_id: str) -> sqlite3.Row | None:
         return self.connection.execute(
-            read_sql("queries/latest_raw_manifest.sql"), (source, city_id)
+            read_query("latest_raw_manifest"), (source, city_id)
         ).fetchone()
 
     def record_failure(self, run_id: str, source: str, city_id: str, message: str) -> None:
         now = utc_now()
         with self.connection:
-            self.connection.execute(
-                read_sql("mutations/record_failure.sql"),
-                (run_id, source, city_id, now, message),
-            )
             self.sources.record_failure(run_id, source, city_id, now, message)
 
     def quarantine(
@@ -675,14 +618,7 @@ class MetadataStore:
         invalid_json = json.dumps(invalid_value, default=str)
         with self.connection:
             self.connection.execute(
-                read_sql("mutations/quarantine_record.sql"),
-                (
-                    run_id, source, city_id, type(error).__name__, field_name, str(error),
-                    record_payload, quarantined_at, natural_key, invalid_json, severity, "v1",
-                ),
-            )
-            self.connection.execute(
-                read_sql("mutations/record_validation_issue.sql"),
+                read_mutation("record_validation_issue"),
                 (
                     run_id, source, city_id, severity, natural_key, field_name, type(error).__name__,
                     invalid_json, str(error), record_payload, "v1", quarantined_at,
@@ -697,22 +633,9 @@ class MetadataStore:
         issues: list[ValidationIssue],
     ) -> None:
         quarantined_at = utc_now()
-        values = [
-            (
-                run_id, source, city_id, issue.error_type, issue.field_name,
-                issue.error_message, json.dumps(issue.record_payload, default=str), quarantined_at,
-                issue.natural_key, json.dumps(issue.invalid_value, default=str),
-                issue.severity, "v1",
-            )
-            for issue in issues
-        ]
         with self.connection:
             self.connection.executemany(
-                read_sql("mutations/quarantine_record.sql"),
-                values,
-            )
-            self.connection.executemany(
-                read_sql("mutations/record_validation_issue.sql"),
+                read_mutation("record_validation_issue"),
                 [
                     (
                         run_id, source, city_id, issue.severity, issue.natural_key,
@@ -727,18 +650,10 @@ class MetadataStore:
     def record_dataset(self, run_id: str, name: str, path: Path, count: int) -> None:
         published_at = utc_now()
         with self.connection:
-            self.connection.execute(
-                read_sql("mutations/record_dataset.sql"),
-                (run_id, name, str(path), count, published_at),
-            )
             self.artifacts.record_processed(run_id, name, path, count, published_at)
 
     def upsert_watermark(self, run_id: str, source: str, city_id: str, watermark_type: str, value: str) -> None:
         with self.connection:
-            self.connection.execute(
-                read_sql("mutations/upsert_watermark.sql"),
-                (source, city_id, watermark_type, value, run_id, utc_now()),
-            )
             self.sources.advance_watermark(run_id, source, city_id, watermark_type, value)
 
     def watermark(self, source: str, city_id: str, watermark_type: str) -> str | None:
@@ -766,26 +681,14 @@ class MetadataStore:
         error_message: str | None = None,
     ) -> None:
         now = utc_now()
+        # Publication status and successful watermarks advance atomically.
         with self.connection:
             for source, city_id, watermark_type, value in watermarks:
-                self.connection.execute(
-                    read_sql("mutations/upsert_watermark.sql"),
-                    (source, city_id, watermark_type, value, run_id, now),
-                )
                 self.sources.advance_watermark(run_id, source, city_id, watermark_type, value)
-            self.connection.execute(
-                read_sql("mutations/complete_run.sql"),
-                (
-                    now, status, now, status, counts["extracted"], counts["valid"], counts["invalid"],
-                    counts["published"], counts.get("inserted", 0), counts.get("updated", 0),
-                    counts.get("unchanged", 0), counts.get("rejected", counts["invalid"]),
-                    error_message, run_id,
-                ),
-            )
             self.runs.complete(run_id, status, counts, now, error_message)
 
     def latest_published_run(self) -> sqlite3.Row | None:
-        return self.connection.execute(read_sql("queries/latest_published_run.sql")).fetchone()
+        return self.connection.execute(read_query("latest_published_run")).fetchone()
 
-    def query(self, relative_path: str, parameters: tuple = ()) -> list[sqlite3.Row]:
-        return self.connection.execute(read_sql(relative_path), parameters).fetchall()
+    def query(self, statement_name: str, parameters: tuple = ()) -> list[sqlite3.Row]:
+        return self.connection.execute(read_query(statement_name), parameters).fetchall()

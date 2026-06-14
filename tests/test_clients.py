@@ -9,7 +9,7 @@ from src.validation import source_utc_timestamp
 
 def test_client_uses_bounded_concurrency() -> None:
     client = OpenMeteoClient(concurrency=2)
-    assert client._semaphore._value == 2
+    assert {semaphore._value for semaphore in client._semaphores.values()} == {2}
     assert client._semaphores["open_meteo_weather"]._value == 2
 
 

@@ -13,10 +13,10 @@ def build_marts(
     members_root: Path | None = None,
     rules_root: Path | None = None,
     publication_cities: Path | None = None,
-    cooldown_hours: int = 0,
     decision_date: date | None = None,
     decision_timezone: str = "Asia/Kolkata",
 ) -> None:
+    """Build analytical products in dependency order into a private staging directory."""
     raw = root / "data/raw"
     processed = processed or root / "data/processed" / f"run_id={run_id}"
     processed.mkdir(parents=True, exist_ok=True)
@@ -65,6 +65,7 @@ def build_marts(
     stakeholder_alerts = processed / "stakeholder_alerts.parquet"
     decision_date = decision_date or date.today()
 
+    # Downstream facts are deliberately sequenced after their validated upstream artifacts.
     connection.execute(
         render_sql(
             "marts/build_historical_baselines.sql",
@@ -119,7 +120,6 @@ def build_marts(
             member_conditions_path=member_conditions,
             environmental_conditions_daily_path=environmental_conditions_daily,
             rule_conditions_path=rule_conditions,
-            cooldown_hours=cooldown_hours,
             output_path=member_risk_exposure_daily,
         )
     )

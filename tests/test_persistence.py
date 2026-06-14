@@ -71,7 +71,6 @@ def test_missing_hour_breaks_persistence_window(tmp_path) -> None:
             "preferred_language": "Hindi",
             "preferred_channel": "app",
             "outreach_consent": True,
-            "last_contact_date": start.date(),
         }
     ]
     member_condition = [{"member_id": "M-1", "condition": "diabetes"}]

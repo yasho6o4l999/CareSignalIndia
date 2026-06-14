@@ -24,7 +24,7 @@ def test_metadata_run_lifecycle_and_latest_publication(tmp_path) -> None:
     assert latest["records_published"] == 3
     assert latest["configuration_version"] == "config-1"
     assert latest["member_snapshot_id"] == "snapshot-1"
-    assert store.query("queries/latest_source_readiness.sql", ("run-1",))[0]["status"] == "success"
+    assert store.query("latest_source_readiness", ("run-1",))[0]["status"] == "success"
     assert store.watermark("weather", "delhi", "latest_successful_run") == "run-1"
     store.close()
 
@@ -37,7 +37,7 @@ def test_failed_run_does_not_become_latest_published(tmp_path) -> None:
     store.complete_run("failed-run", "failed", counts, "invalid")
 
     assert store.latest_published_run() is None
-    assert store.query("queries/latest_invalid_counts.sql", ("failed-run",))[0]["invalid_records"] == 1
+    assert store.query("latest_invalid_counts", ("failed-run",))[0]["invalid_records"] == 1
     store.close()
 
 
@@ -66,7 +66,6 @@ def test_member_dimensions_and_snapshot_registry_are_transactional(tmp_path) -> 
         "preferred_language": "Hindi",
         "preferred_channel": "app",
         "outreach_consent": True,
-        "last_contact_date": date(2026, 6, 1),
         "generator_version": "v1",
     }]
     conditions = [{"member_id": "M-1", "condition": "diabetes"}]
@@ -78,15 +77,32 @@ def test_member_dimensions_and_snapshot_registry_are_transactional(tmp_path) -> 
 
     assert store.connection.execute("SELECT count(*) FROM dim_member").fetchone()[0] == 1
     assert store.connection.execute("SELECT count(*) FROM bridge_member_condition").fetchone()[0] == 1
-    assert store.connection.execute("SELECT status FROM member_snapshots").fetchone()[0] == "published"
-    assert store.current_members()[0]["last_contact_date"] == date(2026, 6, 1)
+    assert store.connection.execute("SELECT status FROM reference_snapshot").fetchone()[0] == "published"
     assert store.current_member_conditions() == conditions
     assert metrics.inserted == 1
     assert metrics.changed_cities == {"delhi"}
     store.close()
 
 
-def test_member_reconciliation_tracks_scd2_and_ignores_contact_only_changes(tmp_path) -> None:
+def test_member_schema_excludes_outreach_execution_state(tmp_path) -> None:
+    store = MetadataStore(tmp_path / "pipeline.db")
+
+    member_columns = {
+        row["name"] for row in store.connection.execute("PRAGMA table_info(dim_member)").fetchall()
+    }
+    tables = {
+        row["name"]
+        for row in store.connection.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table'"
+        ).fetchall()
+    }
+
+    assert "last_contact_date" not in member_columns
+    assert "member_outreach_activity" not in tables
+    store.close()
+
+
+def test_member_reconciliation_tracks_current_state_changes(tmp_path) -> None:
     store = MetadataStore(tmp_path / "pipeline.db")
     member = {
         "member_id": "M-1",
@@ -95,32 +111,20 @@ def test_member_reconciliation_tracks_scd2_and_ignores_contact_only_changes(tmp_
         "preferred_language": "Hindi",
         "preferred_channel": "app",
         "outreach_consent": True,
-        "last_contact_date": date(2026, 6, 1),
         "generator_version": "v1",
     }
     store.reconcile_members([member], [{"member_id": "M-1", "condition": "diabetes"}], "sync-1")
-    contact_only = {**member, "last_contact_date": date(2026, 6, 2)}
-    contact_metrics = store.reconcile_members(
-        [contact_only], [{"member_id": "M-1", "condition": "diabetes"}], "sync-2"
-    )
-    moved = {**contact_only, "city_id": "mumbai"}
+    moved = {**member, "city_id": "mumbai"}
     moved_metrics = store.reconcile_members(
         [moved], [{"member_id": "M-1", "condition": "respiratory"}], "sync-3"
     )
 
-    assert contact_metrics.unchanged == 1
-    assert contact_metrics.changed_cities == {"delhi"}
     assert moved_metrics.updated == 1
     assert moved_metrics.condition_changes == 1
     assert moved_metrics.changed_cities == {"delhi", "mumbai"}
-    history = store.connection.execute(
-        "SELECT city_id, is_current FROM dim_member_history ORDER BY member_history_sk"
-    ).fetchall()
-    assert [(row["city_id"], row["is_current"]) for row in history] == [
-        ("delhi", 0),
-        ("mumbai", 1),
-    ]
-    assert store.current_members()[0]["last_contact_date"] == date(2026, 6, 2)
+    assert store.connection.execute(
+        "SELECT city_id FROM dim_member WHERE member_id = 'M-1'"
+    ).fetchone()[0] == "mumbai"
     store.close()
 
 
@@ -133,7 +137,6 @@ def test_member_reconciliation_deactivates_missing_members(tmp_path) -> None:
         "preferred_language": "Hindi",
         "preferred_channel": "app",
         "outreach_consent": True,
-        "last_contact_date": date(2026, 6, 1),
         "generator_version": "v1",
     }
     store.reconcile_members([member], [], "sync-1")
@@ -156,10 +159,10 @@ def test_member_reconciliation_rejects_orphan_conditions(tmp_path) -> None:
     store.close()
 
 
-def test_records_extraction_metrics_and_raw_manifest(tmp_path) -> None:
+def test_records_extraction_request_metrics_and_raw_manifest(tmp_path) -> None:
     store = MetadataStore(tmp_path / "pipeline.db")
     store.start_run("run-1", "rules-1", "members-1", 2025)
-    store.record_extraction_metrics("run-1", [{
+    store.record_extraction_request_metrics("run-1", [{
         "source": "open_meteo_weather",
         "city_id": "delhi",
         "duration_ms": 100,
@@ -183,7 +186,7 @@ def test_records_extraction_metrics_and_raw_manifest(tmp_path) -> None:
         "published_at": "2026-01-01T10:00:00+00:00",
     })
 
-    assert store.connection.execute("SELECT attempts FROM extraction_metrics").fetchone()[0] == 2
+    assert store.connection.execute("SELECT attempts FROM extraction_request_metric").fetchone()[0] == 2
     assert store.latest_raw_manifest("open_meteo_weather", "delhi")["content_hash"] == "content"
     store.close()
 
@@ -197,7 +200,7 @@ def test_structured_quarantine_persists_field_level_evidence(tmp_path) -> None:
         field_name="relative_humidity", natural_key="2026-01-01", invalid_value=101,
     )
 
-    row = store.connection.execute("SELECT * FROM invalid_records").fetchone()
+    row = store.connection.execute("SELECT * FROM validation_issue").fetchone()
     assert row["field_name"] == "relative_humidity"
     assert row["natural_key"] == "2026-01-01"
     assert row["invalid_value"] == "101"
@@ -218,7 +221,7 @@ def test_quarantine_issues_preserves_original_error_type(tmp_path) -> None:
             severity="warning",
         )
     ])
-    row = store.connection.execute("SELECT error_type, severity FROM invalid_records").fetchone()
+    row = store.connection.execute("SELECT error_type, severity FROM validation_issue").fetchone()
     assert tuple(row) == ("cross_field_pm25_above_pm10", "warning")
     store.close()
 
@@ -236,7 +239,7 @@ def test_invalid_summary_counts_records_instead_of_field_issues(tmp_path) -> Non
         for field_name in ("pm2_5", "pm10")
     ])
 
-    summary = store.query("queries/latest_invalid_counts.sql", ("run-1",))
+    summary = store.query("latest_invalid_counts", ("run-1",))
     assert summary[0]["invalid_records"] == 1
     store.close()
 
@@ -244,7 +247,7 @@ def test_invalid_summary_counts_records_instead_of_field_issues(tmp_path) -> Non
 def test_operational_control_plane_unifies_source_state_and_atomic_finalization(tmp_path) -> None:
     store = MetadataStore(tmp_path / "pipeline.db")
     store.start_run("run-1", "rules-1", "members-1", 2025)
-    store.record_extraction_metrics("run-1", [{
+    store.record_extraction_request_metrics("run-1", [{
         "source": "weather", "city_id": "delhi", "duration_ms": 100, "attempts": 2,
         "http_status": 200, "response_bytes": 500, "status": "success",
     }])
@@ -343,7 +346,7 @@ def test_pipeline_stage_execution_records_success_and_failure(tmp_path) -> None:
     store.start_stage("run-1", "build_marts", 20)
     store.complete_stage("run-1", "build_marts", "failed", 50, 0, "broken")
 
-    rows = store.query("queries/latest_pipeline_stages.sql", ("run-1",))
+    rows = store.query("latest_pipeline_stages", ("run-1",))
     assert [(row["stage_name"], row["status"]) for row in rows] == [
         ("extract_forecasts", "success"),
         ("build_marts", "failed"),

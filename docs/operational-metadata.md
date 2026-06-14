@@ -1,8 +1,7 @@
 # Operational Metadata Control Plane
 
 SQLite is the transactional control plane for pipeline execution, recovery, lineage, and monitoring. The
-normalized schema is additive: legacy tables remain temporarily as compatibility and migration sources,
-while current operational reads and writes use the control-plane entities below.
+repository now creates only the normalized schema; operational facts have one authoritative write path.
 
 ## Normalized Domains
 
@@ -10,7 +9,7 @@ while current operational reads and writes use the control-plane entities below.
 |---|---|---|
 | Run execution | `operational_run`, `operational_run_metric` | Immutable run context separated from mutable counters |
 | Component execution | `pipeline_stage_execution` | Stage duration, input/output rows, status, and failure context |
-| Source execution and state | `source_pipeline_state` | One historical row per run, source, and city containing API metrics, readiness, incremental changes, errors, and resulting watermark |
+| Source execution and state | `extraction_request_metric`, `source_pipeline_state` | Request evidence captured before readiness, then one historical source-city state containing readiness, incremental changes, errors, and resulting watermark |
 | Artifact lineage | `data_artifact`, `artifact_dependency` | Unified raw, compacted, reference, and processed artifact metadata plus `reused_from`, `compacted_from`, and `derived_from` relationships |
 | Data quality | `quality_check_result`, `quality_profile`, `validation_issue` | Queryable outcomes, historical metric profiles, and structured record-level evidence |
 | Reference operations | `reference_snapshot`, `reference_sync_run` | Consistent registry for governed reference snapshots and sync execution |
@@ -26,8 +25,13 @@ Successful run completion and all source watermark advances occur in one SQLite 
 transaction therefore cannot publish a successful run while leaving its source states behind.
 
 Application access is separated into focused `RunRepository`, `SourceStateRepository`, `ArtifactRepository`,
-`QualityRepository`, and `MemberRepository` responsibilities. `MetadataStore` remains a compatibility facade
-for pipeline callers while the legacy schema is dual-written.
+`QualityRepository`, and `MemberRepository` responsibilities. `MetadataStore` coordinates their transactions.
+
+SQLite writes are grouped into two named-statement bundles under `sql/sqlite/mutations/`:
+`insert_statements.sql` contains inserts and upserts, while `update_statements.sql` contains updates and
+deletes. Callers resolve one named section at a time, preserving parameterized execution without maintaining
+a separate file for every small statement. SQLite reads follow the same convention in
+`sql/sqlite/queries/query_statements.sql`.
 
 ## Artifact Lineage
 
@@ -45,9 +49,11 @@ Dependencies provide end-to-end traceability:
 
 ## Migration Boundary
 
-Migration `009_operational_control_plane.sql` creates and backfills the normalized schema. Legacy tables are
-dual-written during the compatibility period so rollback remains possible. They can be removed in a later
-major migration after production observation confirms no external consumers depend on them.
+The take-home repository has no deployed consumer history, so its migration chain is intentionally concise:
+`001_control_plane_schema.sql` defines the final tables and `002_indexes_and_views.sql` defines access paths.
+`003_remove_outreach_execution_state.sql` demonstrates a backward-compatible upgrade that preserves members
+and condition mappings while removing obsolete contact-history state. The migration registry remains in place
+to support deterministic future upgrades.
 
 ## Database Health
 

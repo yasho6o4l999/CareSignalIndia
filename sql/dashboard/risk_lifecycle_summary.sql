@@ -1,3 +1,4 @@
+-- Use one newest snapshot per decision date to avoid counting repeated intraday runs twice.
 WITH all_history AS (
     SELECT *
     FROM read_parquet('{member_risk_history_path}', hive_partitioning = true)

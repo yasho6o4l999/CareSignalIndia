@@ -15,8 +15,16 @@ This enables forecast error, trigger precision, false-positive rate, and rule-ef
 ## Privacy And Access
 
 Real member integration should use tokenized identifiers, encryption, least-privilege roles, member-detail
-access auditing, retention and deletion policies, and strict separation between operational outreach support
-and clinical recommendations. Aggregate dashboard users should not automatically receive member-level access.
+access auditing, retention and deletion policies, and strict separation between decision support, approved
+member engagement, and clinical recommendations. Aggregate dashboard users should not automatically receive
+member-level access.
+
+## Personalized Member Support
+
+The assignment intentionally stops at identifying potentially affected members. A production evolution could
+send personalized, clinically reviewed preventive guidance only after integrating real member data, consent,
+communication preferences, care plans, and an auditable engagement platform. Recommendations must be
+condition-aware, localized, accessible, and approved by appropriate clinical and legal owners.
 
 ## Contract Governance
 

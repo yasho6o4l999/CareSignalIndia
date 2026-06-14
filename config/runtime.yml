@@ -3,7 +3,6 @@ analytical_history_retention_days: 90
 synthetic_members:
   member_count: 5000
   seed: 20260612
-  anchor_date: 2026-06-01
   snapshot_retention_count: 3
   city_weights:
     delhi: 1.2

@@ -31,7 +31,7 @@ class OpenMeteoClient:
         self._policies = policies
         max_concurrency = max(policy.maximum_concurrency for policy in policies.values())
         concurrency = concurrency or max_concurrency
-        self._semaphore = asyncio.Semaphore(concurrency)
+        # Weather and air-quality limits are isolated so one endpoint cannot starve the other.
         self._semaphores = {
             source: asyncio.Semaphore(
                 concurrency if concurrency != max_concurrency else policy.maximum_concurrency

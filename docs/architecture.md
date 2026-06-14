@@ -1,13 +1,12 @@
 # CareSignal India Architecture
 
-This document describes the architecture implemented in the repository today. Scheduling, automated recovery,
-external monitoring, notifications, and dashboard redesign are intentionally shown as future work rather than
-current capabilities.
+This document describes the architecture implemented in the repository today. The system identifies
+potential member exposure and care-operations review workload; it does not contact members.
 
 ## Architecture At A Glance
 
 Read this diagram left to right. It answers one question: **how does public environmental data become an
-actionable care-operations queue?**
+reviewable care-operations workload?**
 
 ```mermaid
 flowchart LR
@@ -15,7 +14,7 @@ flowchart LR
     B["2. Validate and store<br/>Async extraction + Parquet"]
     C["3. Understand local risk<br/>Baselines + regional rules"]
     D["4. Identify affected members<br/>Synthetic chronic-care cohort"]
-    E["5. Publish care actions<br/>Alerts + outreach queue"]
+    E["5. Publish decision support<br/>Prioritization + workload"]
     F["6. Support decisions<br/>Streamlit dashboard"]
 
     A --> B --> C --> D --> E --> F
@@ -33,9 +32,9 @@ flowchart LR
 | 1. Public data | Open-Meteo provides forecasts; NASA POWER provides five complete historical years |
 | 2. Validate and store | Source contracts validate responses; DuckDB merges forecast corrections; manifested Parquet stores reusable run snapshots |
 | 3. Understand risk | Historical percentiles and region-specific rules identify sustained environmental events |
-| 4. Identify members | Triggered cities and relevant chronic conditions are joined to consented synthetic members |
-| 5. Publish actions | Quality-approved alerts and outreach queues are atomically published |
-| 6. Support decisions | Streamlit shows care actions and pipeline health from the latest published run |
+| 4. Identify members | Triggered cities and relevant chronic conditions are joined to synthetic members; consent remains a separate governance attribute |
+| 5. Publish decision support | Quality-approved prioritization and workload datasets are atomically published |
+| 6. Support decisions | Streamlit shows affected-member insights and pipeline health from retained published runs |
 
 ## Data Processing Architecture
 
@@ -61,17 +60,17 @@ flowchart TD
     Conditions --> Triggers
     Rules --> Triggers
 
-    Triggers --> Outreach["Outreach Queue<br/>Consented relevant members"]
-    Members --> Outreach
-    Outreach --> Alerts["Stakeholder Alerts<br/>Aggregated care workload"]
+    Triggers --> Priority["Consented Prioritization Subset<br/>Legacy file: outreach_queue.parquet"]
+    Members --> Priority
+    Priority --> Workload["Stakeholder Workload Summary<br/>Legacy file: stakeholder_alerts.parquet"]
     Triggers --> DailyFacts["Daily analytical facts<br/>Conditions, exposure, workload"]
     Members --> DailyFacts
 
     Baselines --> Published["Atomic Published Run"]
     Conditions --> Published
     Triggers --> Published
-    Outreach --> Published
-    Alerts --> Published
+    Priority --> Published
+    Workload --> Published
     DailyFacts --> Published
     Published --> Dashboard["Streamlit Dashboard"]
 ```
@@ -85,10 +84,10 @@ flowchart TD
 | `active_triggers.parquet` | Contains persisted rule breaches classified as today's actions or upcoming risks |
 | `environmental_conditions_daily.parquet` | Expands trigger windows to a date, city, and condition grain |
 | `environmental_metrics_daily.parquet` | Compares selected-date environmental metrics with local history |
-| `member_risk_exposure_daily.parquet` | Identifies potentially at-risk members before consent and cooldown filters |
-| `care_workload_daily.parquet` | Summarizes at-risk, contactable, and high-priority members by date and city |
-| `outreach_queue.parquet` | Identifies consented members relevant to triggers, separated by action timing |
-| `stakeholder_alerts.parquet` | Summarizes today's immediate workload and later planning workload |
+| `member_risk_exposure_daily.parquet` | Identifies potentially at-risk members and records consent-aware prioritization |
+| `care_workload_daily.parquet` | Summarizes at-risk, consented, and high-priority members by date and city |
+| `outreach_queue.parquet` | Legacy internal name for consented members prioritized for stakeholder review |
+| `stakeholder_alerts.parquet` | Legacy internal name for aggregated stakeholder review workload |
 
 ## Pipeline Control Architecture
 
@@ -138,11 +137,11 @@ flowchart TD
 | Forecast raw | Retryable city snapshots plus compacted source-run analytical artifacts | `source + city_id + observed_at`, partitioned by `run_id` |
 | Historical raw | NASA POWER daily records | `city_id + observed_date`, partitioned by baseline year, city, and year |
 | Regional rule reference | Definitions, predicates, and relevant conditions | Deterministic `ruleset_version` |
-| Member operational dimensions | Current members, SCD2 history, outreach activity, and member-condition bridge | SQLite primary and foreign keys |
+| Member operational dimensions | Current synthetic members and member-condition bridge | SQLite primary and foreign keys |
 | Member analytical snapshot | City-partitioned members and conditions plus manifest | Deterministic `member_snapshot_id` |
 | Publication scope | Complete cities eligible for a run | `run_id + city_id` |
 | Active trigger | Sustained rule breach | `ruleset_version + rule_id + city_id + window_start` |
-| Outreach queue | Consent-aware member-rule action | `member_id + rule_id + window_start` |
+| Prioritization subset | Consent-aware member-rule review candidate | `member_id + rule_id + window_start` |
 | Operational state | Runs, readiness, watermarks, rejects, and lineage | SQLite-managed keys defined in migrations |
 
 ## Component Review Sequence
@@ -161,14 +160,14 @@ next stage:
    and publication eligibility.
 6. **Regional rule engine**: compiled rule model, compound predicates, historical thresholds, and persistence
    evaluation.
-7. **Care-operations marts**: city conditions, triggers, consent-aware outreach, stakeholder aggregation, and
+7. **Care-operations marts**: city conditions, triggers, consent-aware prioritization, stakeholder aggregation, and
    product usefulness.
 8. **Publication and metadata**: staging, atomic publication, lineage, watermarks, migrations, and failure
    semantics.
-9. **Dashboard read layer**: current SQL access pattern and existing KPIs. Full KPI and design redesign happens
-   only after the preceding components are finalized.
-10. **Later operational phase**: scheduling, recovery, monitoring, notifications, and expanded runbook
-    documentation.
+9. **Dashboard read layer**: predicate-pushed SQL access, historical date resolution, KPIs, filters, trends,
+   workload views, and pipeline-health evidence.
+10. **Production evolution**: installed scheduling, deeper recovery automation, external monitoring,
+    notifications, security, and access control.
 
 ## Current Boundaries
 
@@ -189,8 +188,7 @@ next stage:
 
 ### Deliberately Deferred
 
-- Installed scheduler and overlap locking
+- Installed scheduler
 - Automatic abandoned-run recovery and backfill commands
 - External monitoring, alert routing, and notifications
-- Dashboard KPI and visual redesign
-- Full operational runbook and deployment architecture
+- Production authentication, authorization, and member-level access controls

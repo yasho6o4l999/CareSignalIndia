@@ -9,12 +9,12 @@ Parquet marts directly from validated source and reference datasets without load
 |---|---|---|
 | `environmental_conditions_daily` | Decision date, city, rule | Ticker conditions and active environmental context |
 | `environmental_metrics_daily` | Decision date, city, metric | Forecast minimum, average, maximum, and local historical comparison |
-| `member_risk_exposure_daily` | Decision date, member, city, rule | Potentially at-risk population before outreach policy filters |
+| `member_risk_exposure_daily` | Decision date, member, city, rule | Potentially at-risk population with consent-aware review attributes |
 | `care_workload_daily` | Decision date, city | Dashboard KPIs and city comparison |
 
-`member_risk_exposure_daily` deliberately includes members without outreach consent and members inside the
-contact cooldown. It records `outreach_eligible` and an ineligibility reason. The outreach queue is a governed
-subset containing only eligible exposure rows.
+`member_risk_exposure_daily` deliberately includes members without outreach consent. It records
+`outreach_eligible` and an ineligibility reason. The prioritization queue is a governed subset containing only
+consented exposure rows; it represents potential workload, not completed outreach.
 
 ## KPI Definitions
 
@@ -22,7 +22,7 @@ subset containing only eligible exposure rows.
   environmental condition on the selected date.
 - **At-risk percentage:** potentially at-risk members divided by total active members in publication-approved
   cities included by the dashboard filter.
-- **Contactable at-risk members:** at-risk members satisfying consent and cooldown policies.
+- **Consented at-risk members:** at-risk members with outreach consent.
 - **High-priority members:** at-risk members with a priority score of four or higher.
 - **Affected cities:** cities with at least one potentially at-risk member.
 
@@ -31,10 +31,10 @@ subset containing only eligible exposure rows.
 The dashboard converts the daily facts into operational questions:
 
 - **Highest-burden city:** where the largest potentially at-risk cohort requires review.
-- **Largest outreach gap:** where consent or cooldown prevents contact with the most at-risk members.
+- **Largest consent gap:** where the most at-risk members have not provided outreach consent.
 - **Dominant risk driver:** which environmental condition affects the largest distinct-member cohort.
-- **Outreach readiness by city:** contactable workload compared with the current outreach gap.
-- **Vulnerable cohort workload:** contactable and high-priority demand by chronic condition.
+- **Consent readiness by city:** consented workload compared with the current consent gap.
+- **Vulnerable cohort workload:** consented and high-priority demand by chronic condition.
 - **Recommended contact-channel demand:** expected workload by members' preferred outreach channel.
 
 ## Historical Serving

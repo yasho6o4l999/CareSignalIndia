@@ -18,7 +18,6 @@ MEMBERS = [
         "preferred_language": "Hindi",
         "preferred_channel": "app",
         "outreach_consent": True,
-        "last_contact_date": "2026-06-01",
         "generator_version": "v1",
     },
     {
@@ -28,7 +27,6 @@ MEMBERS = [
         "preferred_language": "Marathi",
         "preferred_channel": "sms",
         "outreach_consent": True,
-        "last_contact_date": "2026-05-01",
         "generator_version": "v1",
     },
 ]

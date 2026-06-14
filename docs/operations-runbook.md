@@ -10,6 +10,9 @@ The ETL obtains `data/metadata/etl.lock` before execution. A second overlapping 
 without creating a run. Every successful or failed run records component duration, input rows, output rows,
 status, and error context in SQLite `pipeline_stage_execution`.
 
+The helper uses `.venv/bin/python` when the repository virtual environment exists and otherwise uses the
+active `python` command. It does not require `uv`.
+
 ## Failure Recovery
 
 1. Inspect the latest run, source readiness, validation issues, quality results, and component metrics in the
@@ -21,7 +24,7 @@ python -m src.retry_failed_sources --run-id <failed-run-id>
 ```
 
 The diagnostic retry validates whether sources recovered but deliberately does not write raw data, advance
-watermarks, or publish a partial result. When targets recover, rerun the normal idempotent ETL command.
+watermarks, or publish a result. When targets recover, rerun the normal idempotent ETL command.
 
 3. A normal rerun reads the last successful source-city watermarks, reuses unchanged forecast content,
    removes abandoned raw staging directories, and publishes only after readiness and quality gates pass.
@@ -32,7 +35,7 @@ watermarks, or publish a partial result. When targets recover, rerun the normal 
 - Component duration and row flow
 - Validation issues and invalid-record counts
 - Source, reconciliation, anomaly, and cross-mart quality outcomes
-- At-risk, contactable, high-priority, lifecycle, and outreach-gap workload
+- At-risk, consented, high-priority, lifecycle, and consent-gap workload
 
 Recommended production alerts include mandatory-city failure, freshness breach, quality failure, invalid-volume
 spike, abnormal workload change, and component duration above its service-level objective.

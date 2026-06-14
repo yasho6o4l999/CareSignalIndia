@@ -4,11 +4,12 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Callable
 
-from src.metadata import MetadataStore, utc_now
+from src.metadata import MetadataStore
 
 
 @contextmanager
 def pipeline_lock(path: Path):
+    """Prevent overlapping local ETL runs from publishing competing snapshots."""
     path.parent.mkdir(parents=True, exist_ok=True)
     handle = path.open("w", encoding="utf-8")
     try:
@@ -31,6 +32,7 @@ def tracked_stage(
     input_records: int = 0,
     output_records: Callable[[], int] | None = None,
 ):
+    """Persist stage timing and row-flow evidence even when the stage fails."""
     started = time.perf_counter()
     metadata.start_stage(run_id, stage_name, input_records)
     try:

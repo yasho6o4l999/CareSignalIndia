@@ -56,6 +56,7 @@ def anomaly_result(
     policy: QualityPolicy,
     checked_at: datetime,
 ) -> QualityResult:
+    """Compare a profile only after enough successful historical runs establish a baseline."""
     average, samples = previous_profiles.get((dataset, "row_count"), (0.0, 0))
     if samples < policy.anomaly_detection.minimum_history_runs or average == 0:
         return QualityResult(
@@ -88,6 +89,7 @@ def run_staging_quality_checks(
     expected_city_count: int | None = None,
     policy: QualityPolicy | None = None,
 ) -> tuple[list[QualityResult], list[QualityProfile]]:
+    """Gate source publication and retain profiles for future anomaly detection."""
     checked_at = datetime.now(timezone.utc)
     policy = policy or load_quality_policy()
     previous_profiles = previous_profiles or {}
@@ -226,6 +228,7 @@ def run_cross_mart_quality_checks(
     staging: Path,
     policy: QualityPolicy | None = None,
 ) -> tuple[list[QualityResult], list[QualityProfile]]:
+    """Reconcile published marts against their upstream business invariants."""
     policy = policy or load_quality_policy()
     checked_at = datetime.now(timezone.utc)
     connection = duckdb.connect()

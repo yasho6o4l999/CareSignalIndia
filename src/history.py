@@ -13,6 +13,7 @@ HISTORICAL_FACTS = (
 
 
 def publish_history_snapshot(root: Path, run_id: str, published_run: Path) -> Path:
+    """Publish lightweight historical facts without duplicating bytes where possible."""
     history_root = root / "data/analytical_history"
     final = history_root / f"run_id={run_id}"
     staging = history_root / f".staging-{run_id}"
@@ -22,6 +23,7 @@ def publish_history_snapshot(root: Path, run_id: str, published_run: Path) -> Pa
             source = published_run / name
             destination = staging / name
             try:
+                # Hard links are cheap locally; copying keeps the operation portable across filesystems.
                 os.link(source, destination)
             except OSError:
                 shutil.copy2(source, destination)
@@ -33,6 +35,7 @@ def publish_history_snapshot(root: Path, run_id: str, published_run: Path) -> Pa
 
 
 def apply_history_retention(root: Path, retention_days: int) -> None:
+    """Remove only history directories whose run IDs encode an expired UTC timestamp."""
     cutoff = datetime.now(timezone.utc) - timedelta(days=retention_days)
     history_root = root / "data/analytical_history"
     for path in history_root.glob("run_id=*"):

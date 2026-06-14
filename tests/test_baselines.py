@@ -88,7 +88,6 @@ def test_baseline_rule_uses_city_month_p95_as_effective_threshold(tmp_path) -> N
             "preferred_language": "English",
             "preferred_channel": "app",
             "outreach_consent": True,
-            "last_contact_date": date(2020, 1, 1),
         },
         {
             "member_id": "M-2",
@@ -97,7 +96,6 @@ def test_baseline_rule_uses_city_month_p95_as_effective_threshold(tmp_path) -> N
             "preferred_language": "English",
             "preferred_channel": "call",
             "outreach_consent": False,
-            "last_contact_date": date(2020, 1, 1),
         },
     ]
 
