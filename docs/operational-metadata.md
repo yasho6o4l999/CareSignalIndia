@@ -11,7 +11,7 @@ while current operational reads and writes use the control-plane entities below.
 | Run execution | `operational_run`, `operational_run_metric` | Immutable run context separated from mutable counters |
 | Source execution and state | `source_pipeline_state` | One historical row per run, source, and city containing API metrics, readiness, incremental changes, errors, and resulting watermark |
 | Artifact lineage | `data_artifact`, `artifact_dependency` | Unified raw, compacted, reference, and processed artifact metadata plus `reused_from`, `compacted_from`, and `derived_from` relationships |
-| Data quality | `quality_check_result`, `validation_issue` | Queryable quality outcomes and structured record-level evidence |
+| Data quality | `quality_check_result`, `quality_profile`, `validation_issue` | Queryable outcomes, historical metric profiles, and structured record-level evidence |
 | Reference operations | `reference_snapshot`, `reference_sync_run` | Consistent registry for governed reference snapshots and sync execution |
 
 ## Source State Semantics
@@ -56,3 +56,7 @@ incremental vacuum, and a passive WAL checkpoint. Composite indexes target lates
 lineage, validation, and quality-monitoring queries. Detailed control-plane history is retained because it is
 small and audit-critical; large generated files continue to follow the separate raw and processed retention
 policies.
+
+`quality_profile` stores numeric observations such as source row counts, forecast join-loss ratios, and
+cross-mart exception counts. Anomaly checks compare the current run only with profiles from prior successful
+or partial-success runs, so failed or incomplete executions cannot distort the baseline.

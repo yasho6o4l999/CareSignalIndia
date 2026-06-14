@@ -18,7 +18,7 @@ heat, coastal high-wind disruption, winter cold-plus-pollution exposure, and Jai
 - Predicate pushdown in dashboard queries
 - Five-year NASA POWER historical baselines with city/month p90 and p95 thresholds
 - Deterministic synthetic members with consent controls
-- Machine-readable freshness, uniqueness, and non-empty quality checks
+- Config-driven source checks, cross-source reconciliation, cross-mart integrity, and historical anomalies
 - Configuration-driven regional rules with consecutive-hour persistence windows
 - Decision-timezone-aware separation of today's actions and upcoming forecast risks
 - Governed signal catalog, condition-relevance profiles, dynamic severity bands, and outreach cooldown
@@ -27,6 +27,8 @@ heat, coastal high-wind disruption, winter cold-plus-pollution exposure, and Jai
 See [`docs/architecture.md`](docs/architecture.md) for the current high-level and low-level architecture
 diagrams, component contracts, review sequence, and explicit boundary between implemented capabilities and
 future operational work.
+See [`docs/staging-and-quality.md`](docs/staging-and-quality.md) for quality gates, profile baselines, and
+reconciliation semantics.
 
 No pandas dependency is used. Generated data and credentials are excluded from Git.
 
@@ -154,8 +156,9 @@ Retention protects every snapshot referenced by a published run and removes only
 Compiled regional rules are cached by deterministic ruleset hash under `data/reference/regional_rules/`.
 Forecast-driven marts remain immutable per-run snapshots.
 
-Marts are built under a staging directory. Source quality checks and final publication-contract checks must
-pass before the directory is atomically published. Failed runs remain recorded in SQLite and never replace
+Marts are built under a staging directory. Source quality checks, forecast join reconciliation, and cross-mart
+integrity checks must pass before the directory is atomically published. Historical quality profiles establish
+anomaly baselines; failed-run profiles are excluded from future comparisons. Failed runs remain recorded in SQLite and never replace
 the latest successful dashboard run. The local retention policy keeps the five newest forecast/raw and
 processed snapshots while preserving SQLite run history and reusable reference datasets.
 
@@ -199,6 +202,6 @@ The required reviewer workflow is manual. `deployment/crontab.example` demonstra
 
 ## Next Improvements
 
-- Add source-specific anomaly detection informed by historical validation patterns
+- Expand anomaly detection beyond row counts to field distributions and validation-pattern trends
 - Add alert routing for repeated source degradation and quarantine-volume spikes
 - Add query-plan benchmarks

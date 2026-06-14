@@ -19,6 +19,7 @@ from src.config import (
     load_incremental_policy,
     load_extraction_policy,
     load_outreach_policy,
+    load_quality_policy,
     load_publication_policy,
     load_rules,
     load_runtime_settings,
@@ -26,7 +27,7 @@ from src.config import (
 from src.incremental import ChangeMetrics, merge_forecast_snapshot
 from src.metadata import MetadataStore
 from src.pipeline.marts import build_marts
-from src.quality import run_quality_checks
+from src.quality import run_cross_mart_quality_checks, run_staging_quality_checks
 from src.readiness import evaluate_readiness
 from src.raw import (
     cleanup_raw_staging,
@@ -361,17 +362,6 @@ def verify_publication(staging: Path) -> None:
     missing = expected - {path.name for path in staging.glob("*.parquet")}
     if missing:
         raise RuntimeError(f"Missing publication datasets: {sorted(missing)}")
-    consent, duplicates, persistence = duckdb.connect().execute(
-        render_sql(
-            "quality/publication_contract.sql",
-            outreach_queue_path=staging / "outreach_queue.parquet",
-            active_triggers_path=staging / "active_triggers.parquet",
-        )
-    ).fetchone()
-    if any((consent, duplicates, persistence)):
-        raise RuntimeError(
-            f"Publication contract failed: consent={consent}, duplicates={duplicates}, persistence={persistence}"
-        )
 
 
 def apply_retention() -> None:
@@ -428,14 +418,22 @@ async def main() -> None:
         if readiness.status == "failed":
             raise RuntimeError(f"Publication readiness failed: {readiness.summary}")
 
-        quality_results = run_quality_checks(run_id, str(ROOT / "data/raw"), len(readiness.complete_cities))
-        metadata.record_quality_results(quality_results)
-        write_models(staging / "quality_results.parquet", quality_results)
-        if any(result.status == "fail" for result in quality_results):
-            raise RuntimeError("Fatal data quality failure")
-
         publication_cities = staging / "publication_cities.parquet"
         write_rows(publication_cities, [{"city_id": city_id} for city_id in sorted(readiness.complete_cities)])
+        quality_policy = load_quality_policy()
+        quality_results, quality_profiles = run_staging_quality_checks(
+            run_id,
+            str(ROOT / "data/raw"),
+            publication_cities,
+            metadata.previous_quality_profiles(run_id),
+            len(readiness.complete_cities),
+            quality_policy,
+        )
+        if any(result.status == "fail" for result in quality_results):
+            metadata.record_quality_results(quality_results)
+            metadata.record_quality_profiles(quality_profiles)
+            raise RuntimeError("Fatal data quality failure")
+
         runtime_settings = load_runtime_settings()
         build_marts(
             ROOT,
@@ -448,7 +446,15 @@ async def main() -> None:
             decision_date=datetime.now(ZoneInfo(runtime_settings.decision_timezone)).date(),
             decision_timezone=runtime_settings.decision_timezone,
         )
+        mart_results, mart_profiles = run_cross_mart_quality_checks(run_id, staging, quality_policy)
+        quality_results.extend(mart_results)
+        quality_profiles.extend(mart_profiles)
+        metadata.record_quality_results(quality_results)
+        metadata.record_quality_profiles(quality_profiles)
+        write_models(staging / "quality_results.parquet", quality_results)
         verify_publication(staging)
+        if any(result.status == "fail" for result in quality_results):
+            raise RuntimeError("Fatal staging or cross-mart quality failure")
         counts["published"] = publish_run(run_id, staging, metadata)
         watermarks = [
             (

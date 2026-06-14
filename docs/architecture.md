@@ -102,10 +102,10 @@ flowchart TD
 
     Readiness --> Decision{"Enough complete cities?"}
     Decision -->|No| Failed["status = failed<br/>Do not publish"]
-    Decision -->|Yes| Quality["Source quality checks"]
+    Decision -->|Yes| Quality["Source quality + reconciliation<br/>Profile anomalies"]
     Quality -->|Fatal failure| Failed
     Quality -->|Pass| Build["Build marts in staging directory"]
-    Build --> Contract{"Publication contract passes?"}
+    Build --> Contract{"Cross-mart integrity passes?"}
     Contract -->|No| Failed
     Contract -->|Yes| Publish["Atomic publish"]
     Publish --> Watermarks["Advance successful source-city watermarks"]

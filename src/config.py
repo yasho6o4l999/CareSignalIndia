@@ -114,6 +114,60 @@ class ExtractionPolicy(BaseModel):
     sources: dict[SourceName, ExtractionSourcePolicy]
 
 
+class QualitySourcePolicy(BaseModel):
+    minimum_records_per_city: int = Field(ge=1)
+    maximum_age_hours: int = Field(ge=1)
+
+
+class HistoricalQualityPolicy(BaseModel):
+    minimum_coverage_ratio: float = Field(gt=0, le=1)
+    required_years: int = Field(ge=1, le=20)
+
+
+class CrossSourceQualityPolicy(BaseModel):
+    weather_join_loss_warning_ratio: float = Field(ge=0, le=1)
+    weather_join_loss_fail_ratio: float = Field(ge=0, le=1)
+    air_quality_join_loss_warning_ratio: float = Field(ge=0, le=1)
+    air_quality_join_loss_fail_ratio: float = Field(ge=0, le=1)
+
+    @model_validator(mode="after")
+    def warning_not_above_failure(self) -> "CrossSourceQualityPolicy":
+        if self.weather_join_loss_warning_ratio > self.weather_join_loss_fail_ratio:
+            raise ValueError("weather join-loss warning ratio cannot exceed failure ratio")
+        if self.air_quality_join_loss_warning_ratio > self.air_quality_join_loss_fail_ratio:
+            raise ValueError("air-quality join-loss warning ratio cannot exceed failure ratio")
+        return self
+
+
+class AnomalyDetectionPolicy(BaseModel):
+    minimum_history_runs: int = Field(ge=1, le=100)
+    row_count_change_warning_ratio: float = Field(ge=0)
+    row_count_change_fail_ratio: float = Field(ge=0)
+
+    @model_validator(mode="after")
+    def warning_not_above_failure(self) -> "AnomalyDetectionPolicy":
+        if self.row_count_change_warning_ratio > self.row_count_change_fail_ratio:
+            raise ValueError("row-count warning ratio cannot exceed failure ratio")
+        return self
+
+
+class CrossMartQualityPolicy(BaseModel):
+    maximum_consent_leakage: int = Field(ge=0)
+    maximum_duplicate_member_triggers: int = Field(ge=0)
+    maximum_invalid_persistence_windows: int = Field(ge=0)
+    maximum_orphan_outreach_triggers: int = Field(ge=0)
+    maximum_stakeholder_reconciliation_errors: int = Field(ge=0)
+    maximum_unapproved_city_records: int = Field(ge=0)
+
+
+class QualityPolicy(BaseModel):
+    source_datasets: dict[Literal["weather", "air_quality"], QualitySourcePolicy]
+    historical: HistoricalQualityPolicy
+    cross_source: CrossSourceQualityPolicy
+    anomaly_detection: AnomalyDetectionPolicy
+    cross_mart: CrossMartQualityPolicy
+
+
 class OutreachPolicy(BaseModel):
     cooldown_hours: int = Field(ge=0, le=720)
     repeat_when_severity_increases: bool = True
@@ -330,6 +384,14 @@ def load_outreach_policy() -> OutreachPolicy:
     return OutreachPolicy.model_validate(_load_yaml(CONFIG_ROOT / "outreach_policy.yml"))
 
 
+def load_quality_policy() -> QualityPolicy:
+    policy = QualityPolicy.model_validate(_load_yaml(CONFIG_ROOT / "quality_policy.yml"))
+    missing = {"weather", "air_quality"} - set(policy.source_datasets)
+    if missing:
+        raise ValueError(f"quality policy is missing datasets: {sorted(missing)}")
+    return policy
+
+
 def load_rules() -> list[Rule]:
     items = _load_yaml(CONFIG_ROOT / "regional_rules.yml")["rules"]
     metadata = _load_yaml(CONFIG_ROOT / "signal_catalog.yml")["signals"]
@@ -361,6 +423,7 @@ def configuration_version() -> str:
         "incremental": load_incremental_policy().model_dump(mode="json"),
         "extraction": load_extraction_policy().model_dump(mode="json"),
         "outreach": load_outreach_policy().model_dump(mode="json"),
+        "quality": load_quality_policy().model_dump(mode="json"),
         "runtime": load_runtime_settings().model_dump(mode="json"),
     }
     canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))

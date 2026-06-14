@@ -8,6 +8,7 @@ from typing import Any
 
 from src.config import ROOT
 from src.models import QualityResult
+from src.quality import QualityProfile
 from src.validation import ValidationIssue
 
 
@@ -223,6 +224,28 @@ class QualityRepository:
                 for result in results
             ],
         )
+
+    def record_profiles(self, profiles: list[QualityProfile]) -> None:
+        self.connection.executemany(
+            read_sql("mutations/record_quality_profile.sql"),
+            [
+                (
+                    profile.run_id, profile.stage, profile.dataset, profile.metric_name,
+                    profile.metric_value, profile.recorded_at.isoformat(),
+                )
+                for profile in profiles
+            ],
+        )
+
+    def previous_profiles(
+        self, run_id: str, stage: str = "source"
+    ) -> dict[tuple[str, str], tuple[float, int]]:
+        return {
+            (row["dataset"], row["metric_name"]): (row["average_value"], row["sample_count"])
+            for row in self.connection.execute(
+                read_sql("queries/previous_quality_profiles.sql"), (stage, run_id)
+            ).fetchall()
+        }
 
 
 class MemberRepository:
@@ -702,6 +725,15 @@ class MetadataStore:
     def record_quality_results(self, results: list[QualityResult]) -> None:
         with self.connection:
             self.quality.record_results(results)
+
+    def record_quality_profiles(self, profiles: list[QualityProfile]) -> None:
+        with self.connection:
+            self.quality.record_profiles(profiles)
+
+    def previous_quality_profiles(
+        self, run_id: str, stage: str = "source"
+    ) -> dict[tuple[str, str], tuple[float, int]]:
+        return self.quality.previous_profiles(run_id, stage)
 
     def finalize_run(
         self,

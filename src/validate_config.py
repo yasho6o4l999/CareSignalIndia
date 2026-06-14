@@ -6,6 +6,7 @@ from src.config import (
     load_extraction_policy,
     load_outreach_policy,
     load_publication_policy,
+    load_quality_policy,
     load_rules,
     load_runtime_settings,
 )
@@ -21,6 +22,7 @@ def main() -> None:
     load_incremental_policy()
     load_extraction_policy()
     load_outreach_policy()
+    load_quality_policy()
     load_runtime_settings()
     conflicts = detect_rule_conflicts(rules, load_condition_profiles())
     errors = [finding for finding in conflicts if finding.level == "error"]

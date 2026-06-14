@@ -25,6 +25,8 @@ EXPECTED_SQL_FILES = {
     "quality/profile_dataset.sql",
     "quality/profile_historical_dataset.sql",
     "quality/publication_contract.sql",
+    "quality/cross_source_reconciliation.sql",
+    "quality/cross_mart_integrity.sql",
 }
 
 

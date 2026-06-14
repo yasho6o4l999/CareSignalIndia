@@ -4,6 +4,7 @@ import pytest
 
 from src.metadata import MetadataStore
 from src.models import QualityResult
+from src.quality import QualityProfile
 
 
 def test_metadata_run_lifecycle_and_latest_publication(tmp_path) -> None:
@@ -309,11 +310,23 @@ def test_quality_results_and_reference_metadata_are_normalized(tmp_path) -> None
             details="rows=10", checked_at=datetime.now(timezone.utc),
         )
     ])
+    store.record_quality_profiles([
+        QualityProfile(
+            run_id="run-1", stage="source", dataset="weather", metric_name="row_count",
+            metric_value=100, recorded_at=datetime.now(timezone.utc),
+        )
+    ])
     store.register_member_snapshot(
         "snapshot-1", "v1", "config-1", tmp_path / "manifest.json", "checksum", 1, 2
     )
 
     assert store.connection.execute("SELECT count(*) FROM quality_check_result").fetchone()[0] == 1
+    store.complete_run(
+        "run-1", "success",
+        {"extracted": 100, "valid": 100, "invalid": 0, "published": 1},
+    )
+    store.start_run("run-2", "rules-1", "members-1", 2025)
+    assert store.previous_quality_profiles("run-2")[("weather", "row_count")] == (100.0, 1)
     reference = store.connection.execute("SELECT * FROM reference_snapshot").fetchone()
     assert reference["snapshot_type"] == "member"
     assert reference["primary_record_count"] == 1

@@ -1,0 +1,26 @@
+source_datasets:
+  weather:
+    minimum_records_per_city: 24
+    maximum_age_hours: 6
+  air_quality:
+    minimum_records_per_city: 24
+    maximum_age_hours: 6
+historical:
+  minimum_coverage_ratio: 0.95
+  required_years: 5
+cross_source:
+  weather_join_loss_warning_ratio: 0.25
+  weather_join_loss_fail_ratio: 0.45
+  air_quality_join_loss_warning_ratio: 0.10
+  air_quality_join_loss_fail_ratio: 0.25
+anomaly_detection:
+  minimum_history_runs: 2
+  row_count_change_warning_ratio: 0.20
+  row_count_change_fail_ratio: 0.50
+cross_mart:
+  maximum_consent_leakage: 0
+  maximum_duplicate_member_triggers: 0
+  maximum_invalid_persistence_windows: 0
+  maximum_orphan_outreach_triggers: 0
+  maximum_stakeholder_reconciliation_errors: 0
+  maximum_unapproved_city_records: 0
