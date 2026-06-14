@@ -40,31 +40,11 @@ if not available:
 
 run_by_date = {row[0]: row[1] for row in available}
 available_dates = sorted(run_by_date)
-today_snapshot_run = run_by_date.get(today)
-today_temperature = None
-if today_snapshot_run:
-    today_temperature = connection.execute(
-        render_sql(
-            "dashboard/today_temperature.sql",
-            environmental_metrics_path=(
-                HISTORY_ROOT / f"run_id={today_snapshot_run}/environmental_metrics_daily.parquet"
-            ),
-        ),
-        [today],
-    ).fetchone()
-temperature_text = "Not Available"
-if today_temperature and today_temperature[1] is not None:
-    temperature_text = (
-        f"{today_temperature[0]:.1f}–{today_temperature[2]:.1f} °C"
-        f"<br><small>Average {today_temperature[1]:.1f} °C</small>"
-    )
-
 title_column, date_column = st.columns([4, 1])
 title_column.title("CareSignal India")
 title_column.caption("Year-round environmental care-operations intelligence using synthetic member data.")
 date_column.markdown(
-    f"<div style='text-align:right'><b>Today</b><br>{today.strftime('%d %B %Y')}"
-    f"<br><br><b>Today's Temperature</b><br>{temperature_text}</div>",
+    f"<div style='text-align:right'><b>Today</b><br>{today.strftime('%d %B %Y')}</div>",
     unsafe_allow_html=True,
 )
 
@@ -88,12 +68,16 @@ metrics_path = snapshot / "environmental_metrics_daily.parquet"
 member_risk_path = snapshot / "member_risk_exposure_daily.parquet"
 
 ticker_rows = connection.execute(
-    render_sql("dashboard/environmental_ticker.sql", environmental_conditions_path=conditions_path),
+    render_sql(
+        "dashboard/environmental_ticker.sql",
+        environmental_conditions_path=conditions_path,
+        environmental_metrics_path=metrics_path,
+    ),
     [selected_date, None, None],
 ).fetchall()
 ticker_items = [
     f"{display_text(row[0])}: {display_text(row[1])} ({display_text(row[2])}) · "
-    f"{display_text(row[3])} · {row[4]}h"
+    f"Temperature {row[5]:.1f}–{row[6]:.1f} °C · {display_text(row[3])} · {row[4]}h"
     for row in ticker_rows
 ]
 ticker_text = "   •   ".join(html.escape(item) for item in ticker_items) or "No Active Environmental Risks"

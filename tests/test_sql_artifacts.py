@@ -25,7 +25,6 @@ EXPECTED_SQL_FILES = {
     "dashboard/risk_driver_impact.sql",
     "dashboard/severity_summary.sql",
     "dashboard/stakeholder_alerts.sql",
-    "dashboard/today_temperature.sql",
     "incremental/air_quality_change_metrics.sql",
     "incremental/deduplicate_forecast_snapshot.sql",
     "incremental/merge_air_quality_snapshot.sql",
