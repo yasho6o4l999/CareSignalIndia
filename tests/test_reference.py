@@ -2,7 +2,12 @@ import json
 
 import pytest
 
-from src.reference import publish_member_snapshot, verify_member_snapshot
+from src.reference import (
+    apply_member_snapshot_retention,
+    member_snapshot_id,
+    publish_member_snapshot,
+    verify_member_snapshot,
+)
 
 
 MEMBERS = [
@@ -69,3 +74,46 @@ def test_member_snapshot_rejects_unknown_condition_member(tmp_path) -> None:
             MEMBERS,
             [{"member_id": "M-unknown", "condition": "diabetes"}],
         )
+
+
+def test_snapshot_id_changes_with_member_content() -> None:
+    changed = [{**MEMBERS[0], "city_id": "mumbai"}, MEMBERS[1]]
+    assert member_snapshot_id("v1", MEMBERS, CONDITIONS) != member_snapshot_id(
+        "v1", changed, CONDITIONS
+    )
+
+
+def test_snapshot_reuses_unchanged_city_partitions(tmp_path) -> None:
+    first_root, first_manifest, _ = publish_member_snapshot(
+        tmp_path, "snapshot-1", "config-1", MEMBERS, CONDITIONS
+    )
+    changed_members = [{**MEMBERS[0], "preferred_channel": "sms"}, MEMBERS[1]]
+    second_root, second_manifest, _ = publish_member_snapshot(
+        tmp_path,
+        "snapshot-2",
+        "config-2",
+        changed_members,
+        CONDITIONS,
+        previous_root=first_root,
+        changed_cities={"delhi"},
+    )
+
+    first_mumbai = next(
+        item for item in first_manifest["files"] if item["path"] == "members/city_id=mumbai/data.parquet"
+    )
+    second_mumbai = next(
+        item for item in second_manifest["files"] if item["path"] == "members/city_id=mumbai/data.parquet"
+    )
+    assert first_mumbai["sha256"] == second_mumbai["sha256"]
+    assert (second_root / "members/city_id=delhi/data.parquet").exists()
+
+
+def test_snapshot_retention_protects_referenced_and_latest_versions(tmp_path) -> None:
+    for name in ("old", "protected", "latest"):
+        path = tmp_path / f"snapshot_id={name}"
+        path.mkdir()
+    removed = apply_member_snapshot_retention(tmp_path, {"protected"}, keep_latest=1)
+
+    assert removed == ["old"]
+    assert (tmp_path / "snapshot_id=protected").exists()
+    assert (tmp_path / "snapshot_id=latest").exists()

@@ -1,5 +1,7 @@
 from datetime import date
 
+import pytest
+
 from src.metadata import MetadataStore
 
 
@@ -67,7 +69,7 @@ def test_member_dimensions_and_snapshot_registry_are_transactional(tmp_path) -> 
     }]
     conditions = [{"member_id": "M-1", "condition": "diabetes"}]
 
-    store.replace_member_dimensions(members, conditions)
+    metrics = store.reconcile_members(members, conditions, "sync-1")
     store.register_member_snapshot(
         "snapshot-1", "v1", "config-1", tmp_path / "manifest.json", "checksum", 1, 1
     )
@@ -77,4 +79,76 @@ def test_member_dimensions_and_snapshot_registry_are_transactional(tmp_path) -> 
     assert store.connection.execute("SELECT status FROM member_snapshots").fetchone()[0] == "published"
     assert store.current_members()[0]["last_contact_date"] == date(2026, 6, 1)
     assert store.current_member_conditions() == conditions
+    assert metrics.inserted == 1
+    assert metrics.changed_cities == {"delhi"}
+    store.close()
+
+
+def test_member_reconciliation_tracks_scd2_and_ignores_contact_only_changes(tmp_path) -> None:
+    store = MetadataStore(tmp_path / "pipeline.db")
+    member = {
+        "member_id": "M-1",
+        "city_id": "delhi",
+        "age_band": "40-59",
+        "preferred_language": "Hindi",
+        "preferred_channel": "app",
+        "outreach_consent": True,
+        "last_contact_date": date(2026, 6, 1),
+        "generator_version": "v1",
+    }
+    store.reconcile_members([member], [{"member_id": "M-1", "condition": "diabetes"}], "sync-1")
+    contact_only = {**member, "last_contact_date": date(2026, 6, 2)}
+    contact_metrics = store.reconcile_members(
+        [contact_only], [{"member_id": "M-1", "condition": "diabetes"}], "sync-2"
+    )
+    moved = {**contact_only, "city_id": "mumbai"}
+    moved_metrics = store.reconcile_members(
+        [moved], [{"member_id": "M-1", "condition": "respiratory"}], "sync-3"
+    )
+
+    assert contact_metrics.unchanged == 1
+    assert contact_metrics.changed_cities == {"delhi"}
+    assert moved_metrics.updated == 1
+    assert moved_metrics.condition_changes == 1
+    assert moved_metrics.changed_cities == {"delhi", "mumbai"}
+    history = store.connection.execute(
+        "SELECT city_id, is_current FROM dim_member_history ORDER BY member_history_sk"
+    ).fetchall()
+    assert [(row["city_id"], row["is_current"]) for row in history] == [
+        ("delhi", 0),
+        ("mumbai", 1),
+    ]
+    assert store.current_members()[0]["last_contact_date"] == date(2026, 6, 2)
+    store.close()
+
+
+def test_member_reconciliation_deactivates_missing_members(tmp_path) -> None:
+    store = MetadataStore(tmp_path / "pipeline.db")
+    member = {
+        "member_id": "M-1",
+        "city_id": "delhi",
+        "age_band": "40-59",
+        "preferred_language": "Hindi",
+        "preferred_channel": "app",
+        "outreach_consent": True,
+        "last_contact_date": date(2026, 6, 1),
+        "generator_version": "v1",
+    }
+    store.reconcile_members([member], [], "sync-1")
+    metrics = store.reconcile_members([], [], "sync-2")
+
+    assert metrics.deactivated == 1
+    assert metrics.changed_cities == {"delhi"}
+    assert store.current_members() == []
+    store.close()
+
+
+def test_member_reconciliation_rejects_orphan_conditions(tmp_path) -> None:
+    store = MetadataStore(tmp_path / "pipeline.db")
+    with pytest.raises(ValueError, match="unknown members"):
+        store.reconcile_members(
+            [],
+            [{"member_id": "M-unknown", "condition": "diabetes"}],
+            "sync-1",
+        )
     store.close()

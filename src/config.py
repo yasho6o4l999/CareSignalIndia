@@ -100,6 +100,7 @@ class SyntheticMemberPolicy(BaseModel):
     member_count: int = Field(ge=1)
     seed: int
     anchor_date: date
+    snapshot_retention_count: int = Field(default=3, ge=1, le=100)
     city_weights: dict[str, float] = Field(default_factory=dict)
 
 

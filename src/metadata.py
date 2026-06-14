@@ -1,5 +1,7 @@
 import json
 import sqlite3
+import hashlib
+from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -19,11 +21,22 @@ def read_sql(relative_path: str) -> str:
     return (SQLITE_ROOT / relative_path).read_text(encoding="utf-8")
 
 
+@dataclass(frozen=True)
+class MemberSyncMetrics:
+    inserted: int
+    updated: int
+    deactivated: int
+    unchanged: int
+    condition_changes: int
+    changed_cities: frozenset[str]
+
+
 class MetadataStore:
     def __init__(self, path: Path = DATABASE_PATH) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         self.connection = sqlite3.connect(path)
         self.connection.row_factory = sqlite3.Row
+        self.connection.executescript(read_sql("session_pragmas.sql"))
         self._apply_migrations()
 
     def _apply_migrations(self) -> None:
@@ -70,23 +83,136 @@ class MetadataStore:
                 ),
             )
 
-    def replace_member_dimensions(self, members: list[dict], conditions: list[dict]) -> None:
-        updated_at = utc_now()
-        member_rows = [
-            (
-                row["member_id"], row["city_id"], row["age_band"], row["preferred_language"],
-                row["preferred_channel"], int(row["outreach_consent"]),
-                row["last_contact_date"].isoformat(), row["generator_version"], updated_at,
+    @staticmethod
+    def _member_hash(row: dict) -> str:
+        payload = {
+            key: row[key]
+            for key in (
+                "member_id", "city_id", "age_band", "preferred_language",
+                "preferred_channel", "outreach_consent", "generator_version",
             )
-            for row in members
-        ]
-        condition_rows = [(row["member_id"], row["condition"]) for row in conditions]
+        }
+        canonical = json.dumps(payload, sort_keys=True, default=str, separators=(",", ":"))
+        return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+    def reconcile_members(
+        self,
+        members: list[dict],
+        conditions: list[dict],
+        sync_id: str,
+        activity_source: str = "synthetic_generator",
+    ) -> MemberSyncMetrics:
+        started_at = utc_now()
+        member_ids = [row["member_id"] for row in members]
+        if len(member_ids) != len(set(member_ids)):
+            raise ValueError("Member source contains duplicate member IDs")
+        unknown_condition_members = {row["member_id"] for row in conditions} - set(member_ids)
+        if unknown_condition_members:
+            raise ValueError(
+                f"Member conditions reference unknown members: {sorted(unknown_condition_members)[:5]}"
+            )
+        existing = {
+            row["member_id"]: dict(row)
+            for row in self.connection.execute(read_sql("queries/member_state.sql")).fetchall()
+        }
+        existing_conditions: dict[str, set[str]] = {}
+        for row in self.connection.execute(
+            read_sql("queries/all_member_conditions.sql")
+        ).fetchall():
+            existing_conditions.setdefault(row["member_id"], set()).add(row["condition"])
+        incoming = {row["member_id"]: row for row in members}
+        incoming_conditions: dict[str, set[str]] = {}
+        for row in conditions:
+            incoming_conditions.setdefault(row["member_id"], set()).add(row["condition"])
+        existing_contacts = {
+            row["member_id"]: row["last_contact_date"] for row in self.current_members()
+        }
+        inserted = updated = deactivated = unchanged = condition_changes = 0
+        changed_cities: set[str] = set()
+        now = utc_now()
+
         with self.connection:
-            self.connection.executescript(read_sql("mutations/clear_member_dimensions.sql"))
-            self.connection.executemany(read_sql("mutations/insert_member.sql"), member_rows)
-            self.connection.executemany(
-                read_sql("mutations/insert_member_condition.sql"), condition_rows
+            for member_id, row in incoming.items():
+                source_hash = self._member_hash(row)
+                previous = existing.get(member_id)
+                changed = previous is None or previous["source_hash"] != source_hash or not previous["is_active"]
+                if previous is None:
+                    inserted += 1
+                elif changed:
+                    updated += 1
+                    changed_cities.add(previous["city_id"])
+                    self.connection.execute(
+                        read_sql("mutations/close_member_history.sql"), (now, member_id)
+                    )
+                else:
+                    unchanged += 1
+                if changed:
+                    changed_cities.add(row["city_id"])
+                    self.connection.execute(
+                        read_sql("mutations/upsert_member.sql"),
+                        (
+                            member_id, row["city_id"], row["age_band"], row["preferred_language"],
+                            row["preferred_channel"], int(row["outreach_consent"]),
+                            row["last_contact_date"].isoformat(), row["generator_version"], now,
+                            source_hash,
+                        ),
+                    )
+                    self.connection.execute(
+                        read_sql("mutations/insert_member_history.sql"),
+                        (
+                            member_id, row["city_id"], row["age_band"], row["preferred_language"],
+                            row["preferred_channel"], int(row["outreach_consent"]),
+                            row["generator_version"], source_hash, now,
+                        ),
+                    )
+                self.connection.execute(
+                    read_sql("mutations/record_outreach_activity.sql"),
+                    (member_id, row["last_contact_date"].isoformat(), activity_source),
+                )
+                if existing_contacts.get(member_id) != row["last_contact_date"]:
+                    changed_cities.add(row["city_id"])
+                if existing_conditions.get(member_id, set()) != incoming_conditions.get(member_id, set()):
+                    condition_changes += 1
+                    changed_cities.add(row["city_id"])
+                    self.connection.execute(
+                        read_sql("mutations/delete_member_conditions.sql"), (member_id,)
+                    )
+                    self.connection.executemany(
+                        read_sql("mutations/insert_member_condition.sql"),
+                        [
+                            (member_id, condition)
+                            for condition in sorted(incoming_conditions.get(member_id, set()))
+                        ],
+                    )
+            for member_id in existing.keys() - incoming.keys():
+                previous = existing[member_id]
+                if previous["is_active"]:
+                    deactivated += 1
+                    changed_cities.add(previous["city_id"])
+                    self.connection.execute(
+                        read_sql("mutations/deactivate_member.sql"), (now, member_id)
+                    )
+                    self.connection.execute(
+                        read_sql("mutations/close_member_history.sql"), (now, member_id)
+                    )
+                    self.connection.execute(
+                        read_sql("mutations/delete_member_conditions.sql"), (member_id,)
+                    )
+            self.connection.execute(
+                read_sql("mutations/record_member_sync.sql"),
+                (
+                    sync_id, started_at, utc_now(), inserted, updated, deactivated, unchanged,
+                    condition_changes, json.dumps(sorted(changed_cities)),
+                ),
             )
+        return MemberSyncMetrics(
+            inserted=inserted,
+            updated=updated,
+            deactivated=deactivated,
+            unchanged=unchanged,
+            condition_changes=condition_changes,
+            changed_cities=frozenset(changed_cities),
+        )
 
     def register_member_snapshot(
         self,
@@ -124,6 +250,25 @@ class MetadataStore:
                 read_sql("queries/current_member_conditions.sql")
             ).fetchall()
         ]
+
+    def protected_member_snapshot_ids(self) -> set[str]:
+        return {
+            row["member_snapshot_id"]
+            for row in self.connection.execute(
+                read_sql("queries/protected_member_snapshots.sql")
+            ).fetchall()
+        }
+
+    def latest_member_snapshot_id(self) -> str | None:
+        row = self.connection.execute(read_sql("queries/latest_member_snapshot.sql")).fetchone()
+        return row["snapshot_id"] if row else None
+
+    def delete_member_snapshot_records(self, snapshot_ids: list[str]) -> None:
+        with self.connection:
+            self.connection.executemany(
+                read_sql("mutations/delete_member_snapshot.sql"),
+                [(snapshot_id,) for snapshot_id in snapshot_ids],
+            )
 
     def complete_run(self, run_id: str, status: str, counts: dict[str, int], error_message: str | None = None) -> None:
         now = utc_now()

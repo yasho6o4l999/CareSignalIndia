@@ -26,7 +26,13 @@ from src.metadata import MetadataStore
 from src.pipeline.marts import build_marts
 from src.quality import run_quality_checks
 from src.readiness import evaluate_readiness
-from src.reference import MANIFEST_NAME, publish_member_snapshot, verify_member_snapshot
+from src.reference import (
+    MANIFEST_NAME,
+    apply_member_snapshot_retention,
+    member_snapshot_id,
+    publish_member_snapshot,
+    verify_member_snapshot,
+)
 from src.rules import compile_rules
 from src.storage import write_models, write_rows
 from src.synthetic import generate_members, member_reference_version
@@ -89,7 +95,11 @@ def latest_timestamp(records: list) -> str | None:
     return max(values).isoformat() if values else None
 
 
-def ensure_references(metadata: MetadataStore, config_version: str) -> tuple[Path, Path, str, str]:
+def ensure_references(
+    metadata: MetadataStore,
+    config_version: str,
+    sync_id: str,
+) -> tuple[Path, Path, str, str, str]:
     cities = load_cities()
     member_policy = load_runtime_settings().synthetic_members
     member_version = member_reference_version(cities, member_policy)
@@ -100,19 +110,27 @@ def ensure_references(metadata: MetadataStore, config_version: str) -> tuple[Pat
         city_weights=member_policy.city_weights,
         anchor_date=member_policy.anchor_date,
     )
-    metadata.replace_member_dimensions(members, member_conditions)
+    previous_snapshot_id = metadata.latest_member_snapshot_id()
+    sync_metrics = metadata.reconcile_members(members, member_conditions, sync_id)
     members = metadata.current_members()
     member_conditions = metadata.current_member_conditions()
+    snapshot_id = member_snapshot_id(member_version, members, member_conditions)
+    previous_root = (
+        ROOT / f"data/reference/member_snapshots/snapshot_id={previous_snapshot_id}"
+        if previous_snapshot_id else None
+    )
     member_root, member_manifest, member_manifest_checksum = publish_member_snapshot(
         ROOT / "data/reference/member_snapshots",
-        member_version,
+        snapshot_id,
         config_version,
         members,
         member_conditions,
+        previous_root=previous_root,
+        changed_cities=sync_metrics.changed_cities,
     )
     verify_member_snapshot(member_root)
     metadata.register_member_snapshot(
-        member_version,
+        snapshot_id,
         members[0]["generator_version"],
         member_manifest["configuration_version"],
         member_root / MANIFEST_NAME,
@@ -135,7 +153,7 @@ def ensure_references(metadata: MetadataStore, config_version: str) -> tuple[Pat
         write_rows(rules_root / "rule_predicates.parquet", predicates)
         write_rows(rules_root / "rule_conditions.parquet", conditions)
         write_rows(rules_root / "rule_severity_bands.parquet", severity_bands)
-    return member_root, rules_root, member_version, ruleset_version
+    return member_root, rules_root, member_version, snapshot_id, ruleset_version
 
 
 def record_source_failure(
@@ -292,8 +310,8 @@ async def main() -> None:
     baseline_end_year = date.today().year - 1
     metadata = MetadataStore()
     config_version = configuration_version()
-    member_root, rules_root, member_version, ruleset_version = ensure_references(
-        metadata, config_version
+    member_root, rules_root, member_version, member_snapshot, ruleset_version = ensure_references(
+        metadata, config_version, run_id
     )
     metadata.start_run(
         run_id,
@@ -301,7 +319,7 @@ async def main() -> None:
         member_version,
         baseline_end_year,
         config_version,
-        member_version,
+        member_snapshot,
     )
     counts = {
         "extracted": 0, "valid": 0, "invalid": 0, "published": 0,
@@ -357,6 +375,12 @@ async def main() -> None:
         run_message = readiness.summary if readiness.status == "partial_success" else None
         metadata.complete_run(run_id, readiness.status, counts, run_message)
         apply_retention()
+        removed_snapshots = apply_member_snapshot_retention(
+            ROOT / "data/reference/member_snapshots",
+            metadata.protected_member_snapshot_ids(),
+            load_runtime_settings().synthetic_members.snapshot_retention_count,
+        )
+        metadata.delete_member_snapshot_records(removed_snapshots)
         LOGGER.info("Completed run_id=%s status=%s %s", run_id, readiness.status, readiness.summary)
     except Exception as error:
         if staging.exists():

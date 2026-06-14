@@ -27,6 +27,15 @@ def manifest_checksum(manifest: dict) -> str:
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
+def member_snapshot_id(member_version: str, members: list[dict], conditions: list[dict]) -> str:
+    payload = {
+        "members": members,
+        "conditions": conditions,
+    }
+    canonical = json.dumps(payload, sort_keys=True, default=str, separators=(",", ":"))
+    return f"{member_version}-{hashlib.sha256(canonical.encode('utf-8')).hexdigest()[:12]}"
+
+
 def _validate_member_rows(members: list[dict], conditions: list[dict]) -> None:
     member_ids = [member["member_id"] for member in members]
     if not members or len(member_ids) != len(set(member_ids)):
@@ -39,7 +48,13 @@ def _validate_member_rows(members: list[dict], conditions: list[dict]) -> None:
         raise ValueError("Member snapshot contains duplicate member-condition links")
 
 
-def _write_member_partitions(staging: Path, members: list[dict], conditions: list[dict]) -> None:
+def _write_member_partitions(
+    staging: Path,
+    members: list[dict],
+    conditions: list[dict],
+    previous_root: Path | None = None,
+    changed_cities: set[str] | frozenset[str] | None = None,
+) -> None:
     member_city = {member["member_id"]: member["city_id"] for member in members}
     by_city: dict[str, list[dict]] = {}
     conditions_by_city: dict[str, list[dict]] = {}
@@ -47,7 +62,15 @@ def _write_member_partitions(staging: Path, members: list[dict], conditions: lis
         by_city.setdefault(member["city_id"], []).append(member)
     for condition in conditions:
         conditions_by_city.setdefault(member_city[condition["member_id"]], []).append(condition)
-    for city_id, rows in by_city.items():
+    changed_cities = set(changed_cities or by_city)
+    if previous_root and previous_root.exists():
+        for city_id in set(by_city) - changed_cities:
+            for dataset in ("members", "member_conditions"):
+                source = previous_root / dataset / f"city_id={city_id}"
+                if source.exists():
+                    shutil.copytree(source, staging / dataset / f"city_id={city_id}")
+    for city_id in changed_cities & set(by_city):
+        rows = by_city[city_id]
         write_rows(staging / f"members/city_id={city_id}/data.parquet", rows)
         write_rows(
             staging / f"member_conditions/city_id={city_id}/data.parquet",
@@ -114,6 +137,8 @@ def publish_member_snapshot(
     configuration_version: str,
     members: list[dict],
     conditions: list[dict],
+    previous_root: Path | None = None,
+    changed_cities: set[str] | frozenset[str] | None = None,
 ) -> tuple[Path, dict, str]:
     _validate_member_rows(members, conditions)
     final = reference_root / f"snapshot_id={snapshot_id}"
@@ -124,7 +149,7 @@ def publish_member_snapshot(
     if staging.exists():
         shutil.rmtree(staging)
     try:
-        _write_member_partitions(staging, members, conditions)
+        _write_member_partitions(staging, members, conditions, previous_root, changed_cities)
         manifest = _build_manifest(staging, snapshot_id, configuration_version, members, conditions)
         (staging / MANIFEST_NAME).write_text(
             json.dumps(manifest, indent=2, sort_keys=True) + "\n",
@@ -138,3 +163,24 @@ def publish_member_snapshot(
         if staging.exists():
             shutil.rmtree(staging)
         raise
+
+
+def apply_member_snapshot_retention(
+    reference_root: Path,
+    protected_snapshot_ids: set[str],
+    keep_latest: int,
+) -> list[str]:
+    snapshots = sorted(
+        (path for path in reference_root.glob("snapshot_id=*") if path.is_dir()),
+        key=lambda path: path.stat().st_mtime,
+        reverse=True,
+    )
+    retained_latest = {path.name.removeprefix("snapshot_id=") for path in snapshots[:keep_latest]}
+    removed: list[str] = []
+    for path in snapshots:
+        snapshot_id = path.name.removeprefix("snapshot_id=")
+        if snapshot_id in protected_snapshot_ids or snapshot_id in retained_latest:
+            continue
+        shutil.rmtree(path)
+        removed.append(snapshot_id)
+    return removed

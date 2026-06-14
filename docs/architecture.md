@@ -120,7 +120,7 @@ flowchart TD
 | Parquet `data/raw/` | Forecast snapshots and historical source data | Columnar, compressed, and queryable directly by DuckDB |
 | Parquet `data/reference/` | Versioned compiled rules and validated member snapshots | Reusable, immutable analytical inputs for DuckDB |
 | Parquet `data/processed/` | Immutable published analytical runs | Dashboard never reads partially built output |
-| SQLite `data/metadata/pipeline.db` | Runs, member dimensions, snapshot registry, readiness, watermarks, rejects, migrations, and lineage | Transactional operational state and member system of record |
+| SQLite `data/metadata/pipeline.db` | Runs, current and SCD2 member dimensions, outreach activity, sync metrics, snapshot registry, readiness, watermarks, rejects, migrations, and lineage | Transactional operational state and member system of record |
 | Quarantine in SQLite | Invalid source-city events and payload context | Makes failures visible without storing generated data in Git |
 
 ## Current Data Contracts
@@ -130,7 +130,7 @@ flowchart TD
 | Forecast raw | Weather and air-quality city snapshots | `source + city_id + observed_at`, partitioned by `run_id` |
 | Historical raw | NASA POWER daily records | `city_id + observed_date`, partitioned by baseline year, city, and year |
 | Regional rule reference | Definitions, predicates, and relevant conditions | Deterministic `ruleset_version` |
-| Member operational dimensions | Current members and member-condition bridge | SQLite primary and foreign keys |
+| Member operational dimensions | Current members, SCD2 history, outreach activity, and member-condition bridge | SQLite primary and foreign keys |
 | Member analytical snapshot | City-partitioned members and conditions plus manifest | Deterministic `member_snapshot_id` |
 | Publication scope | Complete cities eligible for a run | `run_id + city_id` |
 | Active trigger | Sustained rule breach | `ruleset_version + rule_id + city_id + window_start` |
