@@ -91,6 +91,18 @@ class IncrementalPolicy(BaseModel):
     forecast_correction_lookback_hours: int = Field(ge=0, le=168)
 
 
+class ExtractionSourcePolicy(BaseModel):
+    maximum_concurrency: int = Field(ge=1, le=50)
+    timeout_seconds: float = Field(gt=0, le=300)
+    maximum_attempts: int = Field(ge=1, le=10)
+    minimum_records: int = Field(ge=1)
+    expected_interval_hours: int = Field(ge=1, le=24)
+
+
+class ExtractionPolicy(BaseModel):
+    sources: dict[SourceName, ExtractionSourcePolicy]
+
+
 class OutreachPolicy(BaseModel):
     cooldown_hours: int = Field(ge=0, le=720)
     repeat_when_severity_increases: bool = True
@@ -285,6 +297,14 @@ def load_incremental_policy() -> IncrementalPolicy:
     return IncrementalPolicy.model_validate(_load_yaml(CONFIG_ROOT / "incremental_policy.yml"))
 
 
+def load_extraction_policy() -> ExtractionPolicy:
+    policy = ExtractionPolicy.model_validate(_load_yaml(CONFIG_ROOT / "extraction_policy.yml"))
+    missing = set(SourceName.__args__) - set(policy.sources)
+    if missing:
+        raise ValueError(f"extraction policy is missing sources: {sorted(missing)}")
+    return policy
+
+
 def load_outreach_policy() -> OutreachPolicy:
     return OutreachPolicy.model_validate(_load_yaml(CONFIG_ROOT / "outreach_policy.yml"))
 
@@ -318,6 +338,7 @@ def configuration_version() -> str:
         "condition_profiles": load_condition_profiles(),
         "publication": load_publication_policy().model_dump(mode="json"),
         "incremental": load_incremental_policy().model_dump(mode="json"),
+        "extraction": load_extraction_policy().model_dump(mode="json"),
         "outreach": load_outreach_policy().model_dump(mode="json"),
         "runtime": load_runtime_settings().model_dump(mode="json"),
     }

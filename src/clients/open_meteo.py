@@ -1,10 +1,12 @@
 import asyncio
 import random
+import time
 from datetime import datetime, timezone
 
 import httpx
 
-from src.config import City
+from src.config import City, ExtractionSourcePolicy, load_extraction_policy
+from src.contracts import validate_parallel_arrays, validate_time_series
 from src.models import AirQualityRecord, WeatherRecord
 
 
@@ -12,11 +14,26 @@ TRANSIENT_STATUS_CODES = {429, 500, 502, 503, 504}
 
 
 class OpenMeteoClient:
-    def __init__(self, concurrency: int = 4, attempts: int = 4) -> None:
+    def __init__(
+        self,
+        concurrency: int | None = None,
+        attempts: int | None = None,
+        policies: dict[str, ExtractionSourcePolicy] | None = None,
+    ) -> None:
+        policies = policies or load_extraction_policy().sources
+        self._policies = policies
+        max_concurrency = max(policy.maximum_concurrency for policy in policies.values())
+        concurrency = concurrency or max_concurrency
         self._semaphore = asyncio.Semaphore(concurrency)
-        self._attempts = attempts
+        self._semaphores = {
+            source: asyncio.Semaphore(
+                concurrency if concurrency != max_concurrency else policy.maximum_concurrency
+            )
+            for source, policy in policies.items()
+        }
+        self.metrics: list[dict] = []
         self._client = httpx.AsyncClient(
-            timeout=httpx.Timeout(30.0),
+            timeout=httpx.Timeout(max(policy.timeout_seconds for policy in policies.values())),
             limits=httpx.Limits(max_connections=concurrency, max_keepalive_connections=concurrency),
             headers={"User-Agent": "CareSignal-India-Candidate-Assignment/0.1"},
         )
@@ -27,23 +44,66 @@ class OpenMeteoClient:
     async def __aexit__(self, *_: object) -> None:
         await self._client.aclose()
 
-    async def _get_json(self, url: str, params: dict) -> dict:
-        async with self._semaphore:
-            for attempt in range(1, self._attempts + 1):
+    async def _get_json(self, source: str, city_id: str, url: str, params: dict) -> dict:
+        policy = self._policies[source]
+        started = time.perf_counter()
+        status_code = None
+        response_bytes = 0
+        async with self._semaphores[source]:
+            for attempt in range(1, policy.maximum_attempts + 1):
                 try:
-                    response = await self._client.get(url, params=params)
+                    response = await self._client.get(
+                        url, params=params, timeout=policy.timeout_seconds
+                    )
+                    status_code = response.status_code
+                    response_bytes = len(response.content)
                     if response.status_code in TRANSIENT_STATUS_CODES:
                         raise httpx.HTTPStatusError("transient response", request=response.request, response=response)
                     response.raise_for_status()
-                    return response.json()
-                except (httpx.TimeoutException, httpx.NetworkError, httpx.HTTPStatusError):
-                    if attempt == self._attempts:
+                    payload = response.json()
+                    self.metrics.append(
+                        {
+                            "source": source, "city_id": city_id, "duration_ms": round((time.perf_counter() - started) * 1000),
+                            "attempts": attempt, "http_status": status_code, "response_bytes": response_bytes,
+                            "status": "success",
+                        }
+                    )
+                    return payload
+                except (httpx.TimeoutException, httpx.NetworkError, httpx.HTTPStatusError) as error:
+                    retryable = not isinstance(error, httpx.HTTPStatusError) or (
+                        error.response.status_code in TRANSIENT_STATUS_CODES
+                    )
+                    if attempt == policy.maximum_attempts or not retryable:
+                        self.metrics.append(
+                            {
+                                "source": source, "city_id": city_id, "duration_ms": round((time.perf_counter() - started) * 1000),
+                                "attempts": attempt, "http_status": status_code, "response_bytes": response_bytes,
+                                "status": "failed",
+                            }
+                        )
                         raise
-                    await asyncio.sleep((2 ** (attempt - 1)) + random.random())
+                    retry_after = (
+                        response.headers.get("Retry-After")
+                        if status_code == 429 and "response" in locals()
+                        else None
+                    )
+                    await asyncio.sleep(float(retry_after) if retry_after else (2 ** (attempt - 1)) + random.random())
+                except ValueError:
+                    self.metrics.append(
+                        {
+                            "source": source, "city_id": city_id,
+                            "duration_ms": round((time.perf_counter() - started) * 1000),
+                            "attempts": attempt, "http_status": status_code,
+                            "response_bytes": response_bytes, "status": "invalid_json",
+                        }
+                    )
+                    raise
         raise RuntimeError("request attempts exhausted")
 
     async def fetch_weather(self, city: City) -> list[WeatherRecord]:
         payload = await self._get_json(
+            "open_meteo_weather",
+            city.city_id,
             "https://api.open-meteo.com/v1/forecast",
             {
                 "latitude": city.latitude,
@@ -54,8 +114,12 @@ class OpenMeteoClient:
             },
         )
         hourly = payload["hourly"]
+        validate_parallel_arrays(
+            hourly,
+            ["time", "apparent_temperature", "temperature_2m", "precipitation", "relative_humidity_2m", "wind_speed_10m"],
+        )
         extracted_at = datetime.now(timezone.utc)
-        return [
+        records = [
             WeatherRecord(
                 city_id=city.city_id,
                 observed_at=datetime.fromisoformat(timestamp).replace(tzinfo=timezone.utc),
@@ -68,9 +132,14 @@ class OpenMeteoClient:
             )
             for index, timestamp in enumerate(hourly["time"])
         ]
+        policy = self._policies["open_meteo_weather"]
+        validate_time_series(city.city_id, records, policy.minimum_records, policy.expected_interval_hours)
+        return records
 
     async def fetch_air_quality(self, city: City) -> list[AirQualityRecord]:
         payload = await self._get_json(
+            "open_meteo_air_quality",
+            city.city_id,
             "https://air-quality-api.open-meteo.com/v1/air-quality",
             {
                 "latitude": city.latitude,
@@ -81,6 +150,7 @@ class OpenMeteoClient:
             },
         )
         hourly = payload["hourly"]
+        validate_parallel_arrays(hourly, ["time", "pm2_5", "pm10"])
         extracted_at = datetime.now(timezone.utc)
         records: list[AirQualityRecord] = []
         for index, timestamp in enumerate(hourly["time"]):
@@ -97,4 +167,11 @@ class OpenMeteoClient:
                 extracted_at=extracted_at,
             )
             )
+        if len(records) < self._policies["open_meteo_air_quality"].minimum_records:
+            raise ValueError(f"{city.city_id} air-quality response has insufficient valid records")
+        policy = self._policies["open_meteo_air_quality"]
+        validate_time_series(
+            city.city_id, records, policy.minimum_records, policy.expected_interval_hours,
+            allow_gaps=True,
+        )
         return records

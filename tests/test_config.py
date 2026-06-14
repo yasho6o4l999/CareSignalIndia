@@ -6,6 +6,7 @@ from src.config import (
     configuration_version,
     load_cities,
     load_incremental_policy,
+    load_extraction_policy,
     load_outreach_policy,
     load_publication_policy,
     load_rules,
@@ -17,6 +18,7 @@ def test_configuration_is_valid() -> None:
     assert any(rule.rule_id == "delhi_winter_pm25" for rule in load_rules())
     assert load_publication_policy().minimum_complete_cities == 5
     assert load_incremental_policy().forecast_correction_lookback_hours == 24
+    assert load_extraction_policy().sources["open_meteo_weather"].maximum_concurrency == 4
     assert load_outreach_policy().cooldown_hours == 24
     assert configuration_version() == configuration_version()
 

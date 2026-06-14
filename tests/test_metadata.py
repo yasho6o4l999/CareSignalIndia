@@ -152,3 +152,35 @@ def test_member_reconciliation_rejects_orphan_conditions(tmp_path) -> None:
             "sync-1",
         )
     store.close()
+
+
+def test_records_extraction_metrics_and_raw_manifest(tmp_path) -> None:
+    store = MetadataStore(tmp_path / "pipeline.db")
+    store.start_run("run-1", "rules-1", "members-1", 2025)
+    store.record_extraction_metrics("run-1", [{
+        "source": "open_meteo_weather",
+        "city_id": "delhi",
+        "duration_ms": 100,
+        "attempts": 2,
+        "http_status": 200,
+        "response_bytes": 500,
+        "status": "success",
+    }])
+    store.record_raw_manifest({
+        "run_id": "run-1",
+        "source": "open_meteo_weather",
+        "city_id": "delhi",
+        "file_path": "/tmp/data.parquet",
+        "manifest_path": "/tmp/data.manifest.json",
+        "content_hash": "content",
+        "file_checksum": "file",
+        "row_count": 10,
+        "minimum_timestamp": "2026-01-01T00:00:00+00:00",
+        "maximum_timestamp": "2026-01-01T09:00:00+00:00",
+        "reused_from_run_id": None,
+        "published_at": "2026-01-01T10:00:00+00:00",
+    })
+
+    assert store.connection.execute("SELECT attempts FROM extraction_metrics").fetchone()[0] == 2
+    assert store.latest_raw_manifest("open_meteo_weather", "delhi")["content_hash"] == "content"
+    store.close()

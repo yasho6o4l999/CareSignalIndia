@@ -10,6 +10,7 @@ heat, coastal high-wind disruption, winter cold-plus-pollution exposure, and Jai
 ## Architecture
 
 - Bounded asynchronous API extraction with connection pooling, timeouts, and retries
+- Source-specific concurrency, timeout, retry, and response-contract policies
 - Pydantic schema and accepted-range validation
 - Partitioned, ZSTD-compressed Parquet storage
 - DuckDB transformations directly over Parquet
@@ -159,6 +160,15 @@ current forecast window, compares it with the previous successful snapshot in Du
 keys as inserted, updated, or unchanged. Unchanged records retain their original extraction metadata,
 corrections replace prior values, and records older than the configurable correction lookback in
 `config/incremental_policy.yml` are pruned. SQLite stores both source-city and run-level change metrics.
+
+Source-specific extraction behavior is configured in `config/extraction_policy.yml`. HTTP metrics capture
+duration, attempts, response size, status, and response code per source-city request. Non-transient client
+errors are not retried, while transient errors use bounded exponential backoff and respect `Retry-After`.
+
+Validated forecast outputs publish through source-city staging paths. Each raw Parquet file has a manifest
+containing its semantic content hash, checksum, row count, timestamp range, and reuse lineage. When merged
+environmental content is unchanged, the new run hard-links the previous file rather than storing duplicate
+bytes while still retaining a complete immutable run view.
 
 Synthetic member data contains no names, contact details, exact addresses, or real identifiers. Outreach priority is an operational demonstration, not a clinical risk score.
 

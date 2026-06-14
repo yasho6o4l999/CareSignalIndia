@@ -1,0 +1,19 @@
+sources:
+  open_meteo_weather:
+    maximum_concurrency: 4
+    timeout_seconds: 30
+    maximum_attempts: 4
+    minimum_records: 24
+    expected_interval_hours: 1
+  open_meteo_air_quality:
+    maximum_concurrency: 4
+    timeout_seconds: 30
+    maximum_attempts: 4
+    minimum_records: 24
+    expected_interval_hours: 1
+  nasa_power_daily:
+    maximum_concurrency: 2
+    timeout_seconds: 90
+    maximum_attempts: 4
+    minimum_records: 1700
+    expected_interval_hours: 24

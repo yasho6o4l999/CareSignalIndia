@@ -305,6 +305,38 @@ class MetadataStore:
                 ),
             )
 
+    def record_extraction_metrics(self, run_id: str, metrics: list[dict]) -> None:
+        with self.connection:
+            self.connection.executemany(
+                read_sql("mutations/record_extraction_metric.sql"),
+                [
+                    (
+                        run_id, metric["source"], metric["city_id"], metric["duration_ms"],
+                        metric["attempts"], metric["http_status"], metric["response_bytes"],
+                        metric["status"], utc_now(),
+                    )
+                    for metric in metrics
+                ],
+            )
+
+    def record_raw_manifest(self, manifest: dict) -> None:
+        with self.connection:
+            self.connection.execute(
+                read_sql("mutations/record_raw_manifest.sql"),
+                (
+                    manifest["run_id"], manifest["source"], manifest["city_id"],
+                    manifest["file_path"], manifest["manifest_path"], manifest["content_hash"],
+                    manifest["file_checksum"], manifest["row_count"], manifest["minimum_timestamp"],
+                    manifest["maximum_timestamp"], manifest["reused_from_run_id"],
+                    manifest["published_at"],
+                ),
+            )
+
+    def latest_raw_manifest(self, source: str, city_id: str) -> sqlite3.Row | None:
+        return self.connection.execute(
+            read_sql("queries/latest_raw_manifest.sql"), (source, city_id)
+        ).fetchone()
+
     def record_failure(self, run_id: str, source: str, city_id: str, message: str) -> None:
         with self.connection:
             self.connection.execute(

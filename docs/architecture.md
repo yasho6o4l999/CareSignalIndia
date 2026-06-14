@@ -31,7 +31,7 @@ flowchart LR
 | Step | What happens |
 |---|---|
 | 1. Public data | Open-Meteo provides forecasts; NASA POWER provides five complete historical years |
-| 2. Validate and store | Pydantic validates records; DuckDB merges forecast corrections; Parquet stores run snapshots |
+| 2. Validate and store | Source contracts validate responses; DuckDB merges forecast corrections; manifested Parquet stores reusable run snapshots |
 | 3. Understand risk | Historical percentiles and region-specific rules identify sustained environmental events |
 | 4. Identify members | Triggered cities and relevant chronic conditions are joined to consented synthetic members |
 | 5. Publish actions | Quality-approved alerts and outreach queues are atomically published |

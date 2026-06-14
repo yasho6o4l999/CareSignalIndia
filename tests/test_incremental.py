@@ -4,6 +4,7 @@ import pyarrow.parquet as pq
 
 from src.incremental import merge_forecast_snapshot
 from src.models import WeatherRecord
+from src.raw import publish_forecast_snapshot
 from src.storage import write_models
 
 
@@ -83,3 +84,25 @@ def test_initial_snapshot_rejects_duplicate_natural_keys(tmp_path) -> None:
     output = pq.read_table(output_path).to_pylist()
     assert (metrics.inserted, metrics.rejected) == (1, 1)
     assert output[0]["temperature_2m"] == 35
+
+
+def test_raw_publication_reuses_identical_content_and_writes_manifest(tmp_path) -> None:
+    observed_at = datetime(2099, 1, 1, tzinfo=timezone.utc)
+    records = [weather_record(observed_at, 30, observed_at)]
+    first = tmp_path / "data/raw/source=open_meteo_weather/run_id=run-1/delhi.parquet"
+    second = tmp_path / "data/raw/source=open_meteo_weather/run_id=run-2/delhi.parquet"
+    _, first_manifest = publish_forecast_snapshot(
+        "open_meteo_weather", "delhi", "run-1", records, None, None, first,
+        observed_at - timedelta(hours=24),
+    )
+    replay = [weather_record(observed_at, 30, observed_at + timedelta(hours=1))]
+    metrics, second_manifest = publish_forecast_snapshot(
+        "open_meteo_weather", "delhi", "run-2", replay, first, "run-1", second,
+        observed_at - timedelta(hours=24),
+    )
+
+    assert metrics.unchanged == 1
+    assert first_manifest["content_hash"] == second_manifest["content_hash"]
+    assert second_manifest["reused_from_run_id"] == "run-1"
+    assert second.with_suffix(".manifest.json").exists()
+    assert first.stat().st_ino == second.stat().st_ino

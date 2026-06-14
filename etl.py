@@ -26,6 +26,7 @@ from src.metadata import MetadataStore
 from src.pipeline.marts import build_marts
 from src.quality import run_quality_checks
 from src.readiness import evaluate_readiness
+from src.raw import publish_forecast_snapshot
 from src.reference import (
     MANIFEST_NAME,
     apply_member_snapshot_retention,
@@ -179,6 +180,8 @@ async def extract_forecasts(run_id: str, metadata: MetadataStore) -> ExtractionR
             asyncio.gather(*(client.fetch_weather(city) for city in cities), return_exceptions=True),
             asyncio.gather(*(client.fetch_air_quality(city) for city in cities), return_exceptions=True),
         )
+    if hasattr(metadata, "record_extraction_metrics"):
+        metadata.record_extraction_metrics(run_id, client.metrics)
     for source, results in [("open_meteo_weather", weather_results), ("open_meteo_air_quality", air_results)]:
         for city, result in zip(cities, results, strict=True):
             if isinstance(result, Exception):
@@ -192,7 +195,18 @@ async def extract_forecasts(run_id: str, metadata: MetadataStore) -> ExtractionR
                 ROOT / f"data/raw/source={source}/run_id={previous_run}/{city.city_id}.parquet"
                 if previous_run else None
             )
-            metrics = merge_forecast_snapshot(source, result, previous_path, output_path, cutoff)
+            metrics, manifest = publish_forecast_snapshot(
+                source,
+                city.city_id,
+                run_id,
+                result,
+                previous_path,
+                previous_run,
+                output_path,
+                cutoff,
+            )
+            if hasattr(metadata, "record_raw_manifest"):
+                metadata.record_raw_manifest(manifest)
             latest = latest_timestamp(result)
             metadata.record_readiness(
                 run_id,
@@ -227,6 +241,7 @@ async def ensure_history(run_id: str, metadata: MetadataStore, baseline_end_year
             *(client.fetch_daily_history(city, start, end) for city in missing),
             return_exceptions=True,
         )
+    metadata.record_extraction_metrics(run_id, client.metrics)
     for city, result in zip(missing, results, strict=True):
         if isinstance(result, Exception):
             record_source_failure(metadata, run_id, "nasa_power_daily", city.city_id, result)
