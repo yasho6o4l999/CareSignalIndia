@@ -9,6 +9,7 @@ while current operational reads and writes use the control-plane entities below.
 | Domain | Tables | Responsibility |
 |---|---|---|
 | Run execution | `operational_run`, `operational_run_metric` | Immutable run context separated from mutable counters |
+| Component execution | `pipeline_stage_execution` | Stage duration, input/output rows, status, and failure context |
 | Source execution and state | `source_pipeline_state` | One historical row per run, source, and city containing API metrics, readiness, incremental changes, errors, and resulting watermark |
 | Artifact lineage | `data_artifact`, `artifact_dependency` | Unified raw, compacted, reference, and processed artifact metadata plus `reused_from`, `compacted_from`, and `derived_from` relationships |
 | Data quality | `quality_check_result`, `quality_profile`, `validation_issue` | Queryable outcomes, historical metric profiles, and structured record-level evidence |

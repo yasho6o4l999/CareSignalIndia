@@ -183,6 +183,7 @@ next stage:
 - Config-driven regional and compound rules
 - Historical percentile baselines
 - Quality and readiness gates with partial publication
+- Overlap-protected execution and component-level duration and row-flow metrics
 - Atomic publication, lineage, retention, and SQLite operational metadata
 - Streamlit dashboard for product outputs and pipeline health
 

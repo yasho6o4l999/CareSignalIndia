@@ -1,3 +1,2 @@
 # Refresh environmental forecasts every six hours.
-0 */6 * * * /absolute/path/to/caresignal-india/scripts/run_etl.sh
-
+0 */6 * * * /absolute/path/to/caresignal-india/scripts/run_etl.sh >> /absolute/path/to/caresignal-india/data/metadata/cron.log 2>&1

@@ -1,9 +1,5 @@
-#!/usr/bin/env sh
-set -eu
+#!/usr/bin/env bash
+set -euo pipefail
 
-PROJECT_ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
-cd "$PROJECT_ROOT"
-
-mkdir -p logs
-exec .venv/bin/python etl.py >> "logs/etl.log" 2>&1
-
+cd "$(dirname "$0")/.."
+exec uv run --with-requirements requirements.txt python etl.py

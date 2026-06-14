@@ -6,6 +6,7 @@ from src.sql import render_sql
 
 
 EXPECTED_SQL_FILES = {
+    "benchmark/member_scale_dashboard.sql",
     "common/count_rows.sql",
     "dashboard/outreach_member_count.sql",
     "dashboard/outreach_queue.sql",
@@ -23,6 +24,7 @@ EXPECTED_SQL_FILES = {
     "dashboard/quality_issue_count.sql",
     "dashboard/risk_trend.sql",
     "dashboard/risk_driver_impact.sql",
+    "dashboard/risk_lifecycle_summary.sql",
     "dashboard/severity_summary.sql",
     "dashboard/stakeholder_alerts.sql",
     "incremental/air_quality_change_metrics.sql",

@@ -333,3 +333,21 @@ def test_quality_results_and_reference_metadata_are_normalized(tmp_path) -> None
     assert reference["related_record_count"] == 2
     store.maintain()
     store.close()
+
+
+def test_pipeline_stage_execution_records_success_and_failure(tmp_path) -> None:
+    store = MetadataStore(tmp_path / "pipeline.db")
+    store.start_run("run-1", "rules-1", "members-1", 2025)
+    store.start_stage("run-1", "extract_forecasts", 10)
+    store.complete_stage("run-1", "extract_forecasts", "success", 125, 20)
+    store.start_stage("run-1", "build_marts", 20)
+    store.complete_stage("run-1", "build_marts", "failed", 50, 0, "broken")
+
+    rows = store.query("queries/latest_pipeline_stages.sql", ("run-1",))
+    assert [(row["stage_name"], row["status"]) for row in rows] == [
+        ("extract_forecasts", "success"),
+        ("build_marts", "failed"),
+    ]
+    assert rows[0]["input_records"] == 10
+    assert rows[0]["output_records"] == 20
+    store.close()

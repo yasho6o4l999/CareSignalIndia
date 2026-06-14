@@ -27,6 +27,7 @@ from src.config import (
 from src.incremental import ChangeMetrics, merge_forecast_snapshot
 from src.history import apply_history_retention, publish_history_snapshot
 from src.metadata import MetadataStore
+from src.operations import pipeline_lock, tracked_stage
 from src.pipeline.marts import build_marts
 from src.quality import run_cross_mart_quality_checks, run_staging_quality_checks
 from src.readiness import evaluate_readiness
@@ -402,8 +403,10 @@ async def main() -> None:
         recovered = recover_raw_staging(ROOT / "data/raw", run_id)
         if recovered:
             LOGGER.info("Removed %s abandoned raw staging directories", len(recovered))
-        extraction = await extract_forecasts(run_id, metadata)
-        extraction.merge(await ensure_history(run_id, metadata, baseline_end_year))
+        with tracked_stage(metadata, run_id, "extract_forecasts", output_records=lambda: extraction.records):
+            extraction = await extract_forecasts(run_id, metadata)
+        with tracked_stage(metadata, run_id, "ensure_history", output_records=lambda: extraction.records):
+            extraction.merge(await ensure_history(run_id, metadata, baseline_end_year))
         counts["extracted"] = extraction.records
         counts["invalid"] = extraction.rejected
         duplicate_rejections = max(0, extraction.rejected - extraction.failures)
@@ -426,32 +429,43 @@ async def main() -> None:
         publication_cities = staging / "publication_cities.parquet"
         write_rows(publication_cities, [{"city_id": city_id} for city_id in sorted(readiness.complete_cities)])
         quality_policy = load_quality_policy()
-        quality_results, quality_profiles = run_staging_quality_checks(
-            run_id,
-            str(ROOT / "data/raw"),
-            publication_cities,
-            metadata.previous_quality_profiles(run_id),
-            len(readiness.complete_cities),
-            quality_policy,
-        )
+        with tracked_stage(
+            metadata, run_id, "staging_quality", counts["valid"],
+            output_records=lambda: len(quality_results),
+        ):
+            quality_results, quality_profiles = run_staging_quality_checks(
+                run_id,
+                str(ROOT / "data/raw"),
+                publication_cities,
+                metadata.previous_quality_profiles(run_id),
+                len(readiness.complete_cities),
+                quality_policy,
+            )
         if any(result.status == "fail" for result in quality_results):
             metadata.record_quality_results(quality_results)
             metadata.record_quality_profiles(quality_profiles)
             raise RuntimeError("Fatal data quality failure")
 
         runtime_settings = load_runtime_settings()
-        build_marts(
-            ROOT,
-            run_id,
-            processed=staging,
-            members_root=member_root,
-            rules_root=rules_root,
-            publication_cities=publication_cities,
-            cooldown_hours=load_outreach_policy().cooldown_hours,
-            decision_date=datetime.now(ZoneInfo(runtime_settings.decision_timezone)).date(),
-            decision_timezone=runtime_settings.decision_timezone,
-        )
-        mart_results, mart_profiles = run_cross_mart_quality_checks(run_id, staging, quality_policy)
+        with tracked_stage(
+            metadata, run_id, "build_analytical_marts", counts["valid"],
+            output_records=lambda: sum(parquet_count(path) for path in staging.glob("*.parquet")),
+        ):
+            build_marts(
+                ROOT,
+                run_id,
+                processed=staging,
+                members_root=member_root,
+                rules_root=rules_root,
+                publication_cities=publication_cities,
+                cooldown_hours=load_outreach_policy().cooldown_hours,
+                decision_date=datetime.now(ZoneInfo(runtime_settings.decision_timezone)).date(),
+                decision_timezone=runtime_settings.decision_timezone,
+            )
+        with tracked_stage(
+            metadata, run_id, "cross_mart_quality", output_records=lambda: len(mart_results)
+        ):
+            mart_results, mart_profiles = run_cross_mart_quality_checks(run_id, staging, quality_policy)
         quality_results.extend(mart_results)
         quality_profiles.extend(mart_profiles)
         metadata.record_quality_results(quality_results)
@@ -460,8 +474,11 @@ async def main() -> None:
         verify_publication(staging)
         if any(result.status == "fail" for result in quality_results):
             raise RuntimeError("Fatal staging or cross-mart quality failure")
-        counts["published"] = publish_run(run_id, staging, metadata)
-        publish_history_snapshot(ROOT, run_id, ROOT / f"data/processed/run_id={run_id}")
+        with tracked_stage(
+            metadata, run_id, "atomic_publication", output_records=lambda: counts["published"]
+        ):
+            counts["published"] = publish_run(run_id, staging, metadata)
+            publish_history_snapshot(ROOT, run_id, ROOT / f"data/processed/run_id={run_id}")
         watermarks = [
             (
                 source,
@@ -496,4 +513,5 @@ async def main() -> None:
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    with pipeline_lock(ROOT / "data/metadata/etl.lock"):
+        asyncio.run(main())

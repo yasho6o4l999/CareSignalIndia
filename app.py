@@ -14,6 +14,7 @@ from src.sql import render_sql
 ROOT = Path(__file__).resolve().parent
 HISTORY_ROOT = ROOT / "data/analytical_history"
 CARE_WORKLOAD_HISTORY = HISTORY_ROOT / "run_id=*/care_workload_daily.parquet"
+MEMBER_RISK_HISTORY = HISTORY_ROOT / "run_id=*/member_risk_exposure_daily.parquet"
 
 
 def display_text(value: str) -> str:
@@ -132,6 +133,13 @@ st.caption(
     f"Selected date `{selected_date}` · latest matching snapshot `{snapshot_run_id}` · "
     f"history retention `{runtime.analytical_history_retention_days}` days"
 )
+metadata = MetadataStore()
+source_readiness = metadata.query("queries/latest_source_readiness.sql", (snapshot_run_id,))
+freshness_values = [
+    row["latest_source_timestamp"] for row in source_readiness if row["latest_source_timestamp"]
+]
+if freshness_values:
+    st.caption(f"Latest source timestamp in selected snapshot: `{max(freshness_values)}`")
 
 st.subheader("Environmental Metrics")
 environmental_metrics = connection.execute(
@@ -196,6 +204,10 @@ channel_workload = connection.execute(
     render_sql("dashboard/contact_channel_workload.sql", member_risk_exposure_path=member_risk_path),
     [selected_date],
 ).fetch_arrow_table()
+lifecycle = connection.execute(
+    render_sql("dashboard/risk_lifecycle_summary.sql", member_risk_history_path=MEMBER_RISK_HISTORY),
+    [selected_date, selected_date],
+).fetch_arrow_table()
 
 readiness_rows = outreach_readiness.to_pylist()
 driver_rows = risk_drivers.to_pylist()
@@ -244,6 +256,8 @@ chart_columns[1].bar_chart(
     y=["contactable_members", "high_priority_members"],
     stack=False,
 )
+st.caption("Member Risk Lifecycle")
+st.bar_chart(lifecycle, x="lifecycle_status", y="members")
 
 st.caption("Daily at-risk and contactable-member demand across the retained forecast horizon.")
 trend = connection.execute(
@@ -253,7 +267,6 @@ trend = connection.execute(
 st.line_chart(trend, x="decision_date", y=["at_risk_members", "contactable_members"])
 
 with st.expander("Pipeline Health And Quality"):
-    metadata = MetadataStore()
     latest_run = metadata.latest_published_run()
     if latest_run:
         run_id = latest_run["run_id"]
@@ -264,6 +277,11 @@ with st.expander("Pipeline Health And Quality"):
         )
         st.dataframe(
             [dict(row) for row in metadata.query("queries/latest_quality_results.sql", (run_id,))],
+            width="stretch",
+        )
+        st.caption("Component execution metrics")
+        st.dataframe(
+            [dict(row) for row in metadata.query("queries/latest_pipeline_stages.sql", (run_id,))],
             width="stretch",
         )
     metadata.close()

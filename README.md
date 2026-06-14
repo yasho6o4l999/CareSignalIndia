@@ -23,6 +23,7 @@ heat, coastal high-wind disruption, winter cold-plus-pollution exposure, and Jai
 - Decision-timezone-aware separation of today's actions and upcoming forecast risks
 - Date-grained environmental, member-risk, and care-workload facts with 90-day analytical history
 - Dynamic dashboard KPIs, relevant environmental metrics, member filters, comparisons, and trends
+- Overlap-protected ETL, component execution metrics, targeted failed-source diagnostics, and CI gates
 - Governed signal catalog, condition-relevance profiles, dynamic severity bands, and outreach cooldown
 - Environment overrides and deterministic configuration lineage stored with every pipeline run
 
@@ -31,6 +32,8 @@ diagrams, component contracts, review sequence, and explicit boundary between im
 future operational work.
 See [`docs/staging-and-quality.md`](docs/staging-and-quality.md) for quality gates, profile baselines, and
 reconciliation semantics.
+See [`docs/operations-runbook.md`](docs/operations-runbook.md), [`docs/kpi-catalog.md`](docs/kpi-catalog.md),
+and [`docs/performance-benchmark.md`](docs/performance-benchmark.md) for operation, governance, and evidence.
 
 No pandas dependency is used. Generated data and credentials are excluded from Git.
 
@@ -199,6 +202,9 @@ Synthetic member data contains no names, contact details, exact addresses, or re
 ## Scheduling
 
 The required reviewer workflow is manual. `deployment/crontab.example` demonstrates a six-hour production-style refresh schedule. A real deployment should additionally use an overlap lock, managed secrets, monitoring, and alerting.
+
+The local ETL now includes an overlap lock. The remaining production scheduler responsibilities are managed
+secrets, external monitoring, alert routing, and infrastructure-level retries.
 
 ## Current Limitations
 

@@ -6,7 +6,28 @@ WITH relevant_metrics AS (
 )
 SELECT
     m.city_id,
-    m.metric,
+    CASE m.metric
+        WHEN 'apparent_temperature' THEN 'Apparent Temperature'
+        WHEN 'temperature_2m' THEN 'Temperature'
+        WHEN 'daily_max_temperature' THEN 'Daily Maximum Temperature'
+        WHEN 'daily_min_temperature' THEN 'Daily Minimum Temperature'
+        WHEN 'daily_temperature_range' THEN 'Daily Temperature Range'
+        WHEN 'apparent_temperature_uplift' THEN 'Apparent Temperature Uplift'
+        WHEN 'daily_precipitation_sum' THEN 'Daily Precipitation'
+        WHEN 'relative_humidity' THEN 'Relative Humidity'
+        WHEN 'wind_speed' THEN 'Wind Speed'
+        WHEN 'pm2_5' THEN 'PM2.5'
+        WHEN 'pm10' THEN 'PM10'
+        WHEN 'pm2_5_rolling_24h' THEN 'PM2.5 Rolling 24h'
+        ELSE m.metric
+    END AS metric,
+    CASE
+        WHEN m.metric LIKE '%temperature%' THEN '°C'
+        WHEN m.metric LIKE '%precipitation%' THEN 'mm'
+        WHEN m.metric = 'relative_humidity' THEN '%'
+        WHEN m.metric = 'wind_speed' THEN 'km/h'
+        WHEN m.metric IN ('pm2_5', 'pm10', 'pm2_5_rolling_24h') THEN 'µg/m³'
+    END AS unit,
     round(m.minimum_value, 1) AS forecast_minimum,
     round(m.average_value, 1) AS forecast_average,
     round(m.maximum_value, 1) AS forecast_maximum,

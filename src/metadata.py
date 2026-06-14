@@ -605,6 +605,28 @@ class MetadataStore:
                 ],
             )
 
+    def start_stage(self, run_id: str, stage_name: str, input_records: int = 0) -> None:
+        with self.connection:
+            self.connection.execute(
+                read_sql("mutations/start_pipeline_stage.sql"),
+                (run_id, stage_name, utc_now(), input_records),
+            )
+
+    def complete_stage(
+        self,
+        run_id: str,
+        stage_name: str,
+        status: str,
+        duration_ms: int,
+        output_records: int = 0,
+        error_message: str | None = None,
+    ) -> None:
+        with self.connection:
+            self.connection.execute(
+                read_sql("mutations/complete_pipeline_stage.sql"),
+                (utc_now(), status, duration_ms, output_records, error_message, run_id, stage_name),
+            )
+
     def record_raw_manifest(self, manifest: dict) -> None:
         with self.connection:
             self.connection.execute(
