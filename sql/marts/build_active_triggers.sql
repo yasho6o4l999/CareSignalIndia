@@ -1,4 +1,5 @@
 COPY (
+    -- Normalize environmental columns so config predicates can evaluate through one join path.
     WITH metric_values AS (
         SELECT city_id, observed_at, metric, metric_value
         FROM read_parquet('{city_conditions_path}')
@@ -128,6 +129,7 @@ COPY (
             ) AS streak_group
         FROM with_previous
     )
+    -- Missing hours and non-breaches split streaks before persistence thresholds are applied.
     , persisted_windows AS (
         SELECT
             ruleset_version,

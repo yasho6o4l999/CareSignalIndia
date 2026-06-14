@@ -8,25 +8,17 @@ from src.sql import render_sql
 EXPECTED_SQL_FILES = {
     "benchmark/member_scale_dashboard.sql",
     "common/count_rows.sql",
-    "dashboard/outreach_member_count.sql",
-    "dashboard/outreach_queue.sql",
-    "dashboard/historical_baselines.sql",
     "dashboard/available_dates.sql",
-    "dashboard/city_comparison.sql",
     "dashboard/condition_workload.sql",
     "dashboard/contact_channel_workload.sql",
-    "dashboard/contact_mode_summary.sql",
     "dashboard/environmental_metrics_daily.sql",
     "dashboard/environmental_ticker.sql",
     "dashboard/executive_kpis.sql",
     "dashboard/member_risk_exposure.sql",
     "dashboard/outreach_readiness_by_city.sql",
-    "dashboard/quality_issue_count.sql",
     "dashboard/risk_trend.sql",
     "dashboard/risk_driver_impact.sql",
     "dashboard/risk_lifecycle_summary.sql",
-    "dashboard/severity_summary.sql",
-    "dashboard/stakeholder_alerts.sql",
     "incremental/air_quality_change_metrics.sql",
     "incremental/deduplicate_forecast_snapshot.sql",
     "incremental/merge_air_quality_snapshot.sql",
@@ -43,7 +35,6 @@ EXPECTED_SQL_FILES = {
     "marts/build_stakeholder_alerts.sql",
     "quality/profile_dataset.sql",
     "quality/profile_historical_dataset.sql",
-    "quality/publication_contract.sql",
     "quality/cross_source_reconciliation.sql",
     "quality/cross_mart_integrity.sql",
 }
@@ -53,8 +44,10 @@ def test_expected_sql_artifacts_are_versioned() -> None:
     actual = {
         str(path.relative_to(ROOT / "sql"))
         for path in (ROOT / "sql").rglob("*.sql")
+        if "sqlite" not in path.relative_to(ROOT / "sql").parts
     }
-    assert EXPECTED_SQL_FILES <= actual
+    # Exact ownership prevents retired dashboard queries from silently becoming dead artifacts.
+    assert EXPECTED_SQL_FILES == actual
 
 
 def test_production_python_does_not_embed_sql() -> None:
@@ -63,6 +56,43 @@ def test_production_python_does_not_embed_sql() -> None:
 
     for path in production_files:
         assert not sql_pattern.search(path.read_text(encoding="utf-8")), f"Embedded SQL found in {path}"
+
+
+def test_every_sqlite_query_and_named_mutation_has_an_owner() -> None:
+    owners = [
+        ROOT / "app.py",
+        ROOT / "etl.py",
+        *(ROOT / "src").rglob("*.py"),
+        *(ROOT / "tests").rglob("*.py"),
+    ]
+    owned_queries = {
+        match
+        for path in owners
+        for match in re.findall(
+            r'(?:read_query|[.]query)\("([a-z0-9_]+)"',
+            path.read_text(encoding="utf-8"),
+        )
+    }
+    owned_mutations = {
+        match
+        for path in owners
+        for match in re.findall(
+            r'read_mutation\("([a-z0-9_]+)"\)',
+            path.read_text(encoding="utf-8"),
+        )
+    }
+    query_artifacts = {
+        match
+        for path in (ROOT / "sql/sqlite/queries").glob("*_statements.sql")
+        for match in re.findall(r"^-- name: ([a-z0-9_]+)$", path.read_text(encoding="utf-8"), re.MULTILINE)
+    }
+    mutation_artifacts = {
+        match
+        for path in (ROOT / "sql/sqlite/mutations").glob("*_statements.sql")
+        for match in re.findall(r"^-- name: ([a-z0-9_]+)$", path.read_text(encoding="utf-8"), re.MULTILINE)
+    }
+    assert query_artifacts == owned_queries
+    assert mutation_artifacts == owned_mutations
 
 
 def test_sql_renderer_escapes_path_quotes() -> None:

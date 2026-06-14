@@ -7,7 +7,6 @@ COPY (
         preferred_language,
         preferred_channel,
         outreach_consent,
-        last_contact_date,
         ruleset_version,
         rule_id,
         signal_name,

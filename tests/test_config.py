@@ -7,7 +7,6 @@ from src.config import (
     load_cities,
     load_incremental_policy,
     load_extraction_policy,
-    load_outreach_policy,
     load_publication_policy,
     load_quality_policy,
     load_rules,
@@ -23,7 +22,6 @@ def test_configuration_is_valid() -> None:
     assert load_incremental_policy().raw_compaction.enabled
     assert load_incremental_policy().raw_compaction.row_group_rows == 65536
     assert load_extraction_policy().sources["open_meteo_weather"].maximum_concurrency == 4
-    assert load_outreach_policy().cooldown_hours == 24
     assert load_quality_policy().cross_mart.maximum_consent_leakage == 0
     assert load_runtime_settings().decision_timezone == "Asia/Kolkata"
     assert load_runtime_settings().analytical_history_retention_days == 90

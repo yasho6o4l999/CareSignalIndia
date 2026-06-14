@@ -1,7 +1,5 @@
 import hashlib
 import json
-import os
-from datetime import date
 from pathlib import Path
 from typing import Any, Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -171,15 +169,9 @@ class QualityPolicy(BaseModel):
     cross_mart: CrossMartQualityPolicy
 
 
-class OutreachPolicy(BaseModel):
-    cooldown_hours: int = Field(ge=0, le=720)
-    repeat_when_severity_increases: bool = True
-
-
 class SyntheticMemberPolicy(BaseModel):
     member_count: int = Field(ge=1)
     seed: int
-    anchor_date: date
     snapshot_retention_count: int = Field(default=3, ge=1, le=100)
     city_weights: dict[str, float] = Field(default_factory=dict)
 
@@ -329,12 +321,8 @@ def _deep_merge(base: dict, override: dict) -> dict:
     return result
 
 
-def load_runtime_settings(environment: str | None = None) -> RuntimeSettings:
-    environment = environment or os.getenv("CARESIGNAL_ENV", "development")
-    base = _load_yaml(CONFIG_ROOT / "runtime.yml")
-    override_path = CONFIG_ROOT / "environments" / f"{environment}.yml"
-    override = _load_yaml(override_path) if override_path.exists() else {}
-    settings = RuntimeSettings.model_validate(_deep_merge(base, override))
+def load_runtime_settings() -> RuntimeSettings:
+    settings = RuntimeSettings.model_validate(_load_yaml(CONFIG_ROOT / "runtime.yml"))
     city_ids = {item["city_id"] for item in _load_yaml(CONFIG_ROOT / "cities.yml")["cities"]}
     unknown_enabled = set(settings.enabled_cities or []) - city_ids
     unknown_weights = set(settings.synthetic_members.city_weights) - city_ids
@@ -345,11 +333,11 @@ def load_runtime_settings(environment: str | None = None) -> RuntimeSettings:
     return settings
 
 
-def load_cities(environment: str | None = None) -> list[City]:
+def load_cities() -> list[City]:
     cities = [City.model_validate(item) for item in _load_yaml(CONFIG_ROOT / "cities.yml")["cities"]]
     city_ids = [city.city_id for city in cities]
     _unique(city_ids, "city IDs")
-    enabled = load_runtime_settings(environment).enabled_cities
+    enabled = load_runtime_settings().enabled_cities
     return [city for city in cities if city.enabled and (enabled is None or city.city_id in enabled)]
 
 
@@ -382,10 +370,6 @@ def load_extraction_policy() -> ExtractionPolicy:
     if missing:
         raise ValueError(f"extraction policy is missing sources: {sorted(missing)}")
     return policy
-
-
-def load_outreach_policy() -> OutreachPolicy:
-    return OutreachPolicy.model_validate(_load_yaml(CONFIG_ROOT / "outreach_policy.yml"))
 
 
 def load_quality_policy() -> QualityPolicy:
@@ -426,7 +410,6 @@ def configuration_version() -> str:
         "publication": load_publication_policy().model_dump(mode="json"),
         "incremental": load_incremental_policy().model_dump(mode="json"),
         "extraction": load_extraction_policy().model_dump(mode="json"),
-        "outreach": load_outreach_policy().model_dump(mode="json"),
         "quality": load_quality_policy().model_dump(mode="json"),
         "runtime": load_runtime_settings().model_dump(mode="json"),
     }

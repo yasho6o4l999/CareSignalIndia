@@ -11,7 +11,7 @@ from src.metadata import MetadataStore
 
 async def retry_failed_sources(run_id: str) -> list[dict]:
     metadata = MetadataStore()
-    targets = metadata.query("queries/failed_source_targets.sql", (run_id,))
+    targets = metadata.query("failed_source_targets", (run_id,))
     metadata.close()
     cities = {city.city_id: city for city in load_cities()}
     results: list[dict] = []

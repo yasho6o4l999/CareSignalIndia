@@ -7,7 +7,6 @@ COPY (
             m.preferred_language,
             m.preferred_channel,
             m.outreach_consent,
-            m.last_contact_date,
             c.condition
         FROM read_parquet('{members_path}') m
         INNER JOIN read_parquet('{member_conditions_path}') c USING (member_id)
@@ -50,13 +49,9 @@ COPY (
         list_sort(list_distinct(list(condition))) AS matched_conditions,
         list_sort(list_distinct(list(condition_relevance))) AS matched_relevance_levels,
         max(priority_score) AS priority_score,
-        outreach_consent
-            AND last_contact_date <= decision_date - INTERVAL '{cooldown_hours} hours'
-            AS outreach_eligible,
+        outreach_consent AS outreach_eligible,
         CASE
             WHEN NOT outreach_consent THEN 'no_outreach_consent'
-            WHEN last_contact_date > decision_date - INTERVAL '{cooldown_hours} hours'
-                THEN 'contact_cooldown'
             ELSE NULL
         END AS outreach_ineligibility_reason
     FROM eligible

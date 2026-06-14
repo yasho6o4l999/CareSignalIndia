@@ -1,3 +1,4 @@
+-- Recompute expected aggregates from lower-grain marts and count contract violations.
 WITH approved_cities AS (
     SELECT DISTINCT city_id FROM read_parquet('{publication_cities_path}')
 ),

@@ -62,7 +62,7 @@ def _read_yaml(path: Path) -> dict:
         return yaml.safe_load(handle) or {}
 
 
-def load_snapshot(config_root: Path, environment: str = "development") -> ConfigurationSnapshot:
+def load_snapshot(config_root: Path) -> ConfigurationSnapshot:
     profiles = _read_yaml(config_root / "condition_relevance.yml")["profiles"]
     detection_rules = _read_yaml(config_root / "regional_rules.yml")["rules"]
     catalog = _read_yaml(config_root / "signal_catalog.yml")["signals"]
@@ -80,11 +80,7 @@ def load_snapshot(config_root: Path, environment: str = "development") -> Config
             if item.get("enabled", True)
         )
     )
-    runtime = _read_yaml(config_root / "runtime.yml")
-    environment_path = config_root / "environments" / f"{environment}.yml"
-    if environment_path.exists():
-        runtime = _deep_merge(runtime, _read_yaml(environment_path))
-    runtime_settings = RuntimeSettings.model_validate(runtime)
+    runtime_settings = RuntimeSettings.model_validate(_read_yaml(config_root / "runtime.yml"))
     if runtime_settings.enabled_cities is not None:
         city_ids = tuple(sorted(set(city_ids) & set(runtime_settings.enabled_cities)))
     return ConfigurationSnapshot(

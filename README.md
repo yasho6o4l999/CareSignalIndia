@@ -1,6 +1,9 @@
 # CareSignal India
 
-CareSignal India is a year-round environmental care-intelligence prototype for digital therapeutics care-operations teams. It combines public environmental forecasts with deterministic synthetic chronic-care member data to create explainable, consent-aware outreach queues.
+CareSignal India is a year-round environmental care-intelligence prototype for digital therapeutics
+care-operations teams. It combines public environmental forecasts with deterministic synthetic chronic-care
+member data to identify potentially affected members and estimate review workload. It does not contact
+members, provide medical advice, or calculate clinical risk.
 
 The initial vertical slice supports Delhi, Mumbai, Bengaluru, Chennai, and Ahmedabad. It models heat, cold, heavy-rain, and particulate-pollution triggers, including a Delhi winter-pollution rule.
 The regional catalog now also includes Lucknow and Jaipur, plus compound scenarios for monsoon disruption,
@@ -24,8 +27,8 @@ heat, coastal high-wind disruption, winter cold-plus-pollution exposure, and Jai
 - Date-grained environmental, member-risk, and care-workload facts with 90-day analytical history
 - Dynamic dashboard KPIs, relevant environmental metrics, member filters, comparisons, and trends
 - Overlap-protected ETL, component execution metrics, targeted failed-source diagnostics, and CI gates
-- Governed signal catalog, condition-relevance profiles, dynamic severity bands, and outreach cooldown
-- Environment overrides and deterministic configuration lineage stored with every pipeline run
+- Governed signal catalog, condition-relevance profiles, dynamic severity bands, and consent-aware prioritization
+- Deterministic configuration lineage stored with every pipeline run
 
 See [`docs/architecture.md`](docs/architecture.md) for the current high-level and low-level architecture
 diagrams, component contracts, review sequence, and explicit boundary between implemented capabilities and
@@ -36,6 +39,17 @@ See [`docs/operations-runbook.md`](docs/operations-runbook.md), [`docs/kpi-catal
 and [`docs/performance-benchmark.md`](docs/performance-benchmark.md) for operation, governance, and evidence.
 
 No pandas dependency is used. Generated data and credentials are excluded from Git.
+
+## Business Use Case
+
+Environmental conditions can create health exposure or care-access disruption for people managing chronic
+conditions. CareSignal India helps a care-operations stakeholder understand which supported cities have a
+sustained environmental condition, which synthetic members could be affected based on city and chronic
+condition relevance, how large the potential review workload is, and whether the pipeline is trustworthy
+enough to support that decision.
+
+The assignment stops at decision support. In production, approved workflows could use real, consented member
+data to provide personalized guidance through a separately governed engagement system.
 
 ## Run Locally
 
@@ -59,6 +73,8 @@ streamlit run app.py
 - NASA POWER Daily API: https://power.larc.nasa.gov/docs/services/api/temporal/daily/
 
 Open-Meteo's free endpoint is intended for non-commercial use. This repository is an educational candidate assignment.
+No API keys or paid credentials are required. See [`docs/sources.md`](docs/sources.md) for source purpose,
+licensing notes, and rule-evidence references.
 
 ## Data Model
 
@@ -71,8 +87,8 @@ Raw datasets are partitioned by `source` and `run_id`. DuckDB builds:
 - `environmental_metrics_daily.parquet`
 - `member_risk_exposure_daily.parquet`
 - `care_workload_daily.parquet`
-- `outreach_queue.parquet`
-- `stakeholder_alerts.parquet`
+- `outreach_queue.parquet` (legacy internal name for the consented prioritization subset)
+- `stakeholder_alerts.parquet` (legacy internal name for aggregated review workload)
 - `quality_results.parquet`
 
 Each qualifying trigger is classified using `config/runtime.yml` as either `today_action` when its forecast
@@ -107,10 +123,8 @@ Before deploying config changes, `python -m src.config_review impact --baseline 
 quantifies changed rule scope, cohorts, severity bands, policies, and estimated affected members. See
 [`docs/configuration.md`](docs/configuration.md) for the review workflow and CI behavior.
 
-`config/runtime.yml` owns the decision timezone and deterministic synthetic-member settings,
-`config/publication_policy.yml` owns
-source-aware publication gates, `config/outreach_policy.yml` owns contact cooldown, and
-`config/environments/` contains environment-specific overrides selected by `CARESIGNAL_ENV`.
+`config/runtime.yml` owns the decision timezone and deterministic synthetic-member settings, while
+`config/publication_policy.yml` owns source-aware publication gates.
 
 ### Regional Scenario Catalog
 
@@ -149,12 +163,14 @@ latest published run from SQLite; `latest_run.json` is no longer used.
 
 The normalized control-plane schema separates run identity from run metrics, combines each source-city
 execution with its resulting watermark, unifies artifact metadata and lineage, and persists quality results.
+Each operational fact has one authoritative write path, and the concise migration chain defines only the
+current schema plus its indexes and views.
 See [`docs/operational-metadata.md`](docs/operational-metadata.md) for the model and migration boundary.
 
-Synthetic member dimensions are incrementally reconciled in SQLite with SCD Type 2 history, deactivation,
-condition-link change tracking, and separate outreach activity. A configured generation anchor date
-ensures identical configuration produces identical members across execution dates. The current dimensions
-are exported from SQLite into immutable, city-partitioned analytical snapshots under
+Synthetic member dimensions are incrementally reconciled in SQLite with current-state updates, deactivation,
+and condition-link change tracking. The fixed generation seed ensures identical configuration produces
+identical members across execution dates. The current dimensions are exported from SQLite into immutable,
+city-partitioned analytical snapshots under
 `data/reference/member_snapshots/`.
 
 Each content-addressed member snapshot rebuilds only changed city partitions and is published atomically
@@ -197,11 +213,14 @@ file rather than storing duplicate bytes while still retaining a complete immuta
 files are then streamed into one compacted file per forecast source and run; quality checks and marts read
 the compacted artifacts to avoid DuckDB small-file overhead.
 
-Synthetic member data contains no names, contact details, exact addresses, or real identifiers. Outreach priority is an operational demonstration, not a clinical risk score.
+Synthetic member data contains no names, contact details, exact addresses, or real identifiers. Review
+priority is an operational demonstration, not a clinical risk score.
 
 ## Scheduling
 
-The required reviewer workflow is manual. `deployment/crontab.example` demonstrates a six-hour production-style refresh schedule. A real deployment should additionally use an overlap lock, managed secrets, monitoring, and alerting.
+The required reviewer workflow is manual. `deployment/crontab.example` demonstrates a six-hour
+production-style refresh schedule. The ETL already prevents overlapping local runs; a real deployment should
+add managed secrets, external monitoring, alert routing, and infrastructure-level retries.
 
 The local ETL now includes an overlap lock. The remaining production scheduler responsibilities are managed
 secrets, external monitoring, alert routing, and infrastructure-level retries.
@@ -209,9 +228,8 @@ secrets, external monitoring, alert routing, and infrastructure-level retries.
 ## Current Limitations
 
 - Open-Meteo provides modeled air-quality forecasts rather than ground-station observations.
-- No messages are sent; the project only generates stakeholder and outreach queues.
+- No messages are sent; the project only generates member prioritization and stakeholder workload datasets.
 - Historical dashboard dates represent the latest retained forecast snapshot containing that date, not observed outcomes.
-- Severity-escalation repeat outreach is configured but requires production action-history data before it can be enforced.
 - The synthetic source emits full extracts; production ingestion should consume source-native incremental member changes.
 - The scheduler example is not installed automatically.
 
@@ -220,3 +238,17 @@ secrets, external monitoring, alert routing, and infrastructure-level retries.
 - Expand anomaly detection beyond row counts to field distributions and validation-pattern trends
 - Add alert routing for repeated source degradation and quarantine-volume spikes
 - Add query-plan benchmarks
+
+## AI-Assisted Development
+
+AI was used to clarify the product direction, challenge architecture decisions, implement and review
+components, debug failures, improve documentation, and run regression checks. Human decisions explicitly
+constrained the scope to synthetic members, keyless public APIs, local execution, no data in Git, and no
+member outreach execution. See [`docs/ai-usage.md`](docs/ai-usage.md) and
+[`ai_transcript/transcript.md`](ai_transcript/transcript.md).
+
+## Submission Guide
+
+Reviewer-oriented deliverables are indexed in [`docs/submission-checklist.md`](docs/submission-checklist.md).
+The data model is summarized in [`docs/data-dictionary.md`](docs/data-dictionary.md), and assumptions and
+limitations are consolidated in [`docs/assumptions-and-limitations.md`](docs/assumptions-and-limitations.md).

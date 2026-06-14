@@ -12,7 +12,7 @@ while executable profiling and reconciliation logic lives under `sql/quality/`.
 | Historical profile | Expected city, year, and row coverage | Any failure blocks mart construction |
 | Cross-source reconciliation | Weather and air-quality forecast-hour join loss for publication-approved cities | Configured warning is visible; configured failure blocks mart construction |
 | Historical anomaly | Current source row count compared with the average of prior successful-run profiles | Configured warning or failure severity |
-| Cross-mart integrity | Consent leakage, duplicate outreach, invalid persistence, orphan outreach, alert and workload reconciliation, risk-exposure lineage, and publication-city scope | Any count above its configured maximum blocks publication |
+| Cross-mart integrity | Consent leakage into prioritization, duplicate member-rule rows, invalid persistence, orphaned prioritization rows, workload reconciliation, risk-exposure lineage, and publication-city scope | Any count above its configured maximum blocks publication |
 
 ## Historical Profiles
 
@@ -25,4 +25,4 @@ exists, the anomaly check passes with `baseline=insufficient` in its details rat
 Cross-source reconciliation considers future forecast hours for cities that passed publication readiness.
 Weather-side and air-quality-side loss are measured separately because the APIs can expose different forecast
 horizons. Cross-mart checks then treat the staged marts as one product contract and reconcile member-level
-outreach back to triggers and stakeholder aggregates before atomic publication.
+prioritization back to triggers and stakeholder aggregates before atomic publication.

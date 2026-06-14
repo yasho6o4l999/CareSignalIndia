@@ -37,11 +37,13 @@ def merge_forecast_snapshot(
     output_path: Path,
     cutoff: datetime,
 ) -> ChangeMetrics:
+    """Merge a revision-prone rolling forecast while retaining a bounded correction window."""
     if source not in SQL_BY_SOURCE:
         raise ValueError(f"Unsupported incremental source: {source}")
     incoming_path = output_path.with_suffix(".incoming.parquet")
     write_models(incoming_path, incoming_records)
     if previous_path is None or not previous_path.exists():
+        # The first snapshot still needs natural-key deduplication before it becomes a watermark base.
         connection = duckdb.connect()
         connection.execute(
             render_sql(

@@ -19,6 +19,7 @@ RAW_SCHEMA_VERSION = "v1"
 
 
 def parquet_content_hash(path: Path) -> str:
+    """Hash business content while ignoring run-specific extraction metadata."""
     digest = hashlib.sha256()
     parquet = pq.ParquetFile(path)
     columns = [
@@ -169,6 +170,7 @@ def compact_forecast_run(
     run_id: str,
     policy: RawCompactionPolicy,
 ) -> dict | None:
+    """Stream city snapshots into a governed source-level file with bounded memory."""
     if not policy.enabled:
         return None
     run_root = raw_root / f"source={source}" / f"run_id={run_id}"
@@ -225,6 +227,7 @@ def compact_forecast_run(
         )
         verify_raw_manifest(staging_path, manifest, previous_manifest)
         if previous_manifest and previous_manifest["content_hash"] == manifest["content_hash"]:
+            # Preserve an immutable run view while reusing identical compacted bytes.
             previous_path = previous_manifest_paths[0].parent / "data.parquet"
             staging_path.unlink()
             try:
@@ -263,6 +266,7 @@ def publish_forecast_snapshot(
     final_path: Path,
     cutoff: datetime,
 ) -> tuple[ChangeMetrics, dict]:
+    """Validate and atomically publish one incremental source-city snapshot."""
     staging = (
         final_path.parents[2]
         / ".staging"
@@ -275,6 +279,7 @@ def publish_forecast_snapshot(
     content_hash = parquet_content_hash(staging)
     reused_from = None
     if previous_path and previous_path.exists() and parquet_content_hash(previous_path) == content_hash:
+        # A hard link avoids duplicate storage; the new manifest still records reuse lineage.
         staging.unlink()
         try:
             os.link(previous_path, staging)

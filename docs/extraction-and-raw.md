@@ -15,8 +15,9 @@ The clients:
 - Validate required response arrays, matching array lengths, minimum records, timestamp order, uniqueness,
   and expected intervals where applicable.
 
-SQLite `extraction_metrics` records request duration, attempts, HTTP status, response bytes, and final HTTP
-status per source and city.
+SQLite `extraction_request_metric` records request duration, attempts, HTTP status, response bytes, and final
+HTTP status before readiness is known. Those metrics are incorporated into the authoritative
+`source_pipeline_state` row when the source-city call succeeds or fails.
 
 ## Source Record Validation
 
@@ -55,7 +56,7 @@ change into downstream queries.
 
 After the incremental merge, the semantic hash is compared with the previous successful source-city
 snapshot. Identical content is hard-linked where supported, avoiding duplicate storage while preserving a
-complete immutable run layout. SQLite `raw_manifests` provides queryable lineage for every raw artifact.
+complete immutable run layout. SQLite `data_artifact` provides queryable lineage for every raw artifact.
 
 ## Compaction And Recovery
 
@@ -79,3 +80,7 @@ renames.
 Open-Meteo exposes a revision-prone rolling forecast rather than a source change feed, so the pipeline still
 retrieves the forecast window before comparing it. Production storage should additionally apply
 landing-zone retention for original source payloads.
+
+Generated extracts are intentionally excluded from Git. A reviewer creates them by running `python etl.py`;
+the committed `.gitkeep` files preserve the required local directory structure without publishing generated
+or potentially sensitive data.

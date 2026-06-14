@@ -39,6 +39,7 @@ if not available:
     st.info("No analytical dates are available. Run `python etl.py` first.")
     st.stop()
 
+# Each date resolves to its newest retained snapshot; selecting history never calls source APIs.
 run_by_date = {row[0]: row[1] for row in available}
 available_dates = sorted(run_by_date)
 title_column, date_column = st.columns([4, 1])
@@ -109,9 +110,9 @@ kpi_columns[0].metric(
     help="Distinct active members whose city, conditions, and selected-date environmental risks match.",
 )
 kpi_columns[1].metric(
-    "Contactable At-Risk Members",
+    "Consented At-Risk Members",
     f"{contactable or 0:,}",
-    help="At-risk members with outreach consent who are outside the configured contact cooldown.",
+    help="At-risk members who have provided outreach consent.",
 )
 kpi_columns[2].metric(
     "High-Priority Members",
@@ -134,7 +135,7 @@ st.caption(
     f"history retention `{runtime.analytical_history_retention_days}` days"
 )
 metadata = MetadataStore()
-source_readiness = metadata.query("queries/latest_source_readiness.sql", (snapshot_run_id,))
+source_readiness = metadata.query("latest_source_readiness", (snapshot_run_id,))
 freshness_values = [
     row["latest_source_timestamp"] for row in source_readiness if row["latest_source_timestamp"]
 ]
@@ -182,7 +183,7 @@ st.dataframe(
             "Contact Priority", help="Combines environmental severity, condition relevance, and age band."
         ),
         "outreach_eligible": st.column_config.CheckboxColumn(
-            "Contactable", help="Whether outreach consent and cooldown requirements are satisfied."
+            "Consented", help="Whether the member has provided outreach consent."
         ),
     },
 )
@@ -222,10 +223,10 @@ insight_columns[0].metric(
     help="City with the largest number of potentially at-risk members.",
 )
 insight_columns[1].metric(
-    "Largest Outreach Gap",
+    "Largest Consent Gap",
     display_text(largest_gap["city_id"]) if largest_gap else "None",
-    f"{largest_gap['outreach_gap']:,} members not currently contactable" if largest_gap else None,
-    help="City where the most at-risk members cannot currently be contacted due to consent or cooldown.",
+    f"{largest_gap['outreach_gap']:,} members without outreach consent" if largest_gap else None,
+    help="City with the largest difference between at-risk and consented members.",
 )
 insight_columns[2].metric(
     "Dominant Risk Driver",
@@ -235,7 +236,7 @@ insight_columns[2].metric(
 )
 
 chart_columns = st.columns(2)
-chart_columns[0].caption("Outreach Readiness By City")
+chart_columns[0].caption("Consent Readiness By City")
 chart_columns[0].bar_chart(
     outreach_readiness, x="city_id", y=["contactable_members", "outreach_gap"], stack=True
 )
@@ -259,7 +260,7 @@ chart_columns[1].bar_chart(
 st.caption("Member Risk Lifecycle")
 st.bar_chart(lifecycle, x="lifecycle_status", y="members")
 
-st.caption("Daily at-risk and contactable-member demand across the retained forecast horizon.")
+st.caption("Daily at-risk and consented-member demand across the retained forecast horizon.")
 trend = connection.execute(
     render_sql("dashboard/risk_trend.sql", care_workload_history_path=CARE_WORKLOAD_HISTORY),
     [None, None],
@@ -272,16 +273,16 @@ with st.expander("Pipeline Health And Quality"):
         run_id = latest_run["run_id"]
         st.caption(f"Latest published pipeline run: `{run_id}` · status `{latest_run['status']}`")
         st.dataframe(
-            [dict(row) for row in metadata.query("queries/latest_source_readiness.sql", (run_id,))],
+            [dict(row) for row in metadata.query("latest_source_readiness", (run_id,))],
             width="stretch",
         )
         st.dataframe(
-            [dict(row) for row in metadata.query("queries/latest_quality_results.sql", (run_id,))],
+            [dict(row) for row in metadata.query("latest_quality_results", (run_id,))],
             width="stretch",
         )
         st.caption("Component execution metrics")
         st.dataframe(
-            [dict(row) for row in metadata.query("queries/latest_pipeline_stages.sql", (run_id,))],
+            [dict(row) for row in metadata.query("latest_pipeline_stages", (run_id,))],
             width="stretch",
         )
     metadata.close()

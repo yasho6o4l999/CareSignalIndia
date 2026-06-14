@@ -8,7 +8,6 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import pyarrow.parquet as pq
-import duckdb
 
 from src.clients.nasa_power import NasaPowerClient
 from src.clients.open_meteo import OpenMeteoClient
@@ -18,13 +17,12 @@ from src.config import (
     load_cities,
     load_incremental_policy,
     load_extraction_policy,
-    load_outreach_policy,
     load_quality_policy,
     load_publication_policy,
     load_rules,
     load_runtime_settings,
 )
-from src.incremental import ChangeMetrics, merge_forecast_snapshot
+from src.incremental import ChangeMetrics
 from src.history import apply_history_retention, publish_history_snapshot
 from src.metadata import MetadataStore
 from src.operations import pipeline_lock, tracked_stage
@@ -47,7 +45,6 @@ from src.reference import (
 from src.rules import compile_rules
 from src.storage import write_models, write_rows
 from src.synthetic import generate_members, member_reference_version
-from src.sql import render_sql
 from src.validation import ValidatedBatch
 
 
@@ -145,7 +142,6 @@ def ensure_references(
         count=member_policy.member_count,
         seed=member_policy.seed,
         city_weights=member_policy.city_weights,
-        anchor_date=member_policy.anchor_date,
     )
     previous_snapshot_id = metadata.latest_member_snapshot_id()
     sync_metrics = metadata.reconcile_members(members, member_conditions, sync_id)
@@ -208,6 +204,7 @@ def record_source_failure(
 async def extract_forecasts(run_id: str, metadata: MetadataStore) -> ExtractionResult:
     cities = load_cities()
     extraction = ExtractionResult()
+    # Re-fetch the rolling horizon, then retain only the configured correction overlap.
     cutoff = datetime.now(timezone.utc) - timedelta(
         hours=load_incremental_policy().forecast_correction_lookback_hours
     )
@@ -216,8 +213,8 @@ async def extract_forecasts(run_id: str, metadata: MetadataStore) -> ExtractionR
             asyncio.gather(*(client.fetch_weather(city) for city in cities), return_exceptions=True),
             asyncio.gather(*(client.fetch_air_quality(city) for city in cities), return_exceptions=True),
         )
-    if hasattr(metadata, "record_extraction_metrics"):
-        metadata.record_extraction_metrics(run_id, client.metrics)
+    if hasattr(metadata, "record_extraction_request_metrics"):
+        metadata.record_extraction_request_metrics(run_id, client.metrics)
     for source, results in [("open_meteo_weather", weather_results), ("open_meteo_air_quality", air_results)]:
         for city, result in zip(cities, results, strict=True):
             if isinstance(result, Exception):
@@ -281,6 +278,7 @@ async def ensure_history(run_id: str, metadata: MetadataStore, baseline_end_year
     cities = load_cities()
     extraction = ExtractionResult()
     history_root = ROOT / f"data/raw/source=nasa_power_daily/schema_version=v2/baseline_end_year={baseline_end_year}"
+    # Historical baselines are immutable for a complete year, so cached cities avoid repeat API calls.
     missing = [city for city in cities if not any((history_root / f"city_id={city.city_id}").glob("year=*/*.parquet"))]
     cached = [city for city in cities if city not in missing]
     for city in cached:
@@ -295,7 +293,7 @@ async def ensure_history(run_id: str, metadata: MetadataStore, baseline_end_year
             *(client.fetch_daily_history(city, start, end) for city in missing),
             return_exceptions=True,
         )
-    metadata.record_extraction_metrics(run_id, client.metrics)
+    metadata.record_extraction_request_metrics(run_id, client.metrics)
     for city, result in zip(missing, results, strict=True):
         if isinstance(result, Exception):
             record_source_failure(metadata, run_id, "nasa_power_daily", city.city_id, result)
@@ -341,6 +339,7 @@ def parquet_count(path: Path) -> int:
 
 
 def publish_run(run_id: str, staging: Path, metadata: MetadataStore) -> int:
+    """Atomically expose a fully validated run and register each analytical artifact."""
     final = ROOT / f"data/processed/run_id={run_id}"
     os.replace(staging, final)
     total = 0
@@ -458,7 +457,6 @@ async def main() -> None:
                 members_root=member_root,
                 rules_root=rules_root,
                 publication_cities=publication_cities,
-                cooldown_hours=load_outreach_policy().cooldown_hours,
                 decision_date=datetime.now(ZoneInfo(runtime_settings.decision_timezone)).date(),
                 decision_timezone=runtime_settings.decision_timezone,
             )
@@ -479,6 +477,7 @@ async def main() -> None:
         ):
             counts["published"] = publish_run(run_id, staging, metadata)
             publish_history_snapshot(ROOT, run_id, ROOT / f"data/processed/run_id={run_id}")
+        # Watermarks advance only after the analytical snapshot has published successfully.
         watermarks = [
             (
                 source,
