@@ -15,19 +15,18 @@ ROOT = Path(__file__).resolve().parent
 HISTORY_ROOT = ROOT / "data/analytical_history"
 CARE_WORKLOAD_HISTORY = HISTORY_ROOT / "run_id=*/care_workload_daily.parquet"
 
+
+def display_text(value: str) -> str:
+    result = value.replace("_", " ").title()
+    return result.replace("Pm2 5", "PM2.5").replace("Pm10", "PM10").replace("24H", "24h")
+
+
 st.set_page_config(page_title="CareSignal India", layout="wide")
 runtime = load_runtime_settings()
 today = datetime.now(ZoneInfo(runtime.decision_timezone)).date()
 
-title_column, date_column = st.columns([4, 1])
-title_column.title("CareSignal India")
-title_column.caption("Year-round environmental care-operations intelligence using synthetic member data.")
-date_column.markdown(
-    f"<div style='text-align:right'><b>Today</b><br>{today.strftime('%d %B %Y')}</div>",
-    unsafe_allow_html=True,
-)
-
 if not DATABASE_PATH.exists() or not HISTORY_ROOT.exists():
+    st.title("CareSignal India")
     st.info("No analytical history found. Run `python etl.py` first.")
     st.stop()
 
@@ -41,9 +40,37 @@ if not available:
 
 run_by_date = {row[0]: row[1] for row in available}
 available_dates = sorted(run_by_date)
+today_snapshot_run = run_by_date.get(today)
+today_temperature = None
+if today_snapshot_run:
+    today_temperature = connection.execute(
+        render_sql(
+            "dashboard/today_temperature.sql",
+            environmental_metrics_path=(
+                HISTORY_ROOT / f"run_id={today_snapshot_run}/environmental_metrics_daily.parquet"
+            ),
+        ),
+        [today],
+    ).fetchone()
+temperature_text = "Not Available"
+if today_temperature and today_temperature[1] is not None:
+    temperature_text = (
+        f"{today_temperature[0]:.1f}–{today_temperature[2]:.1f} °C"
+        f"<br><small>Average {today_temperature[1]:.1f} °C</small>"
+    )
+
+title_column, date_column = st.columns([4, 1])
+title_column.title("CareSignal India")
+title_column.caption("Year-round environmental care-operations intelligence using synthetic member data.")
+date_column.markdown(
+    f"<div style='text-align:right'><b>Today</b><br>{today.strftime('%d %B %Y')}"
+    f"<br><br><b>Today's Temperature</b><br>{temperature_text}</div>",
+    unsafe_allow_html=True,
+)
+
 default_date = today if today in run_by_date else available_dates[-1]
 selected_date = st.date_input(
-    "Analysis date",
+    "Date",
     value=default_date,
     min_value=available_dates[0],
     max_value=available_dates[-1],
@@ -60,23 +87,16 @@ conditions_path = snapshot / "environmental_conditions_daily.parquet"
 metrics_path = snapshot / "environmental_metrics_daily.parquet"
 member_risk_path = snapshot / "member_risk_exposure_daily.parquet"
 
-city_options = ["All", *[city.city_id for city in load_cities()]]
-city = st.selectbox(
-    "Dashboard city",
-    city_options,
-    help="Filters the ticker, KPIs, environmental metrics, member table, and insight charts.",
-)
-selected_city = None if city == "All" else city
-
 ticker_rows = connection.execute(
     render_sql("dashboard/environmental_ticker.sql", environmental_conditions_path=conditions_path),
-    [selected_date, selected_city, selected_city],
+    [selected_date, None, None],
 ).fetchall()
 ticker_items = [
-    f"{row[0]}: {row[1]} ({row[2]}) · {row[3]} · {row[4]}h"
+    f"{display_text(row[0])}: {display_text(row[1])} ({display_text(row[2])}) · "
+    f"{display_text(row[3])} · {row[4]}h"
     for row in ticker_rows
 ]
-ticker_text = "   •   ".join(html.escape(item) for item in ticker_items) or "No active environmental risks"
+ticker_text = "   •   ".join(html.escape(item) for item in ticker_items) or "No Active Environmental Risks"
 st.markdown(
     f"""
     <style>
@@ -93,33 +113,33 @@ st.markdown(
 
 kpis = connection.execute(
     render_sql("dashboard/executive_kpis.sql", care_workload_path=workload_path),
-    [selected_date, selected_city, selected_city],
+    [selected_date, None, None],
 ).fetchone()
 total_members, at_risk, at_risk_pct, contactable, high_priority, affected_cities = kpis
 kpi_columns = st.columns(5)
 kpi_columns[0].metric(
-    "Potentially at-risk members",
+    "Potentially At-Risk Members",
     f"{at_risk or 0:,}",
     f"{at_risk_pct or 0:.2f}% of {total_members or 0:,}",
     help="Distinct active members whose city, conditions, and selected-date environmental risks match.",
 )
 kpi_columns[1].metric(
-    "Contactable at-risk members",
+    "Contactable At-Risk Members",
     f"{contactable or 0:,}",
     help="At-risk members with outreach consent who are outside the configured contact cooldown.",
 )
 kpi_columns[2].metric(
-    "High-priority members",
+    "High-Priority Members",
     f"{high_priority or 0:,}",
     help="Distinct at-risk members with priority score of four or higher.",
 )
 kpi_columns[3].metric(
-    "Affected cities",
+    "Affected Cities",
     f"{affected_cities or 0:,}",
     help="Publication-approved cities with at least one potentially at-risk member.",
 )
 kpi_columns[4].metric(
-    "Active conditions",
+    "Active Conditions",
     f"{len(ticker_rows):,}",
     help="Distinct city-level environmental conditions active on the selected date.",
 )
@@ -129,75 +149,45 @@ st.caption(
     f"history retention `{runtime.analytical_history_retention_days}` days"
 )
 
-st.subheader("Relevant Environmental Metrics")
+st.subheader("Environmental Metrics")
 environmental_metrics = connection.execute(
     render_sql(
         "dashboard/environmental_metrics_daily.sql",
         environmental_conditions_path=conditions_path,
         environmental_metrics_path=metrics_path,
     ),
-    [selected_date, selected_city, selected_city, selected_date],
+    [selected_date, None, None, selected_date],
 ).fetch_arrow_table()
 st.dataframe(
     environmental_metrics,
     width="stretch",
     column_config={
         "forecast_maximum": st.column_config.NumberColumn(
-            "Forecast maximum", help="Maximum forecast value for the selected date."
+            "Forecast Maximum", help="Maximum forecast value for the selected date."
         ),
         "historical_p95": st.column_config.NumberColumn(
-            "Historical p95", help="Value exceeded by roughly five percent of historical observations."
+            "Historical P95", help="Value exceeded by roughly five percent of historical observations."
         ),
     },
 )
 
 st.subheader("Affected Members")
 st.caption("Ordered by contact priority, then the number of affected members in the city.")
-table_filter_columns = st.columns(6)
-condition = table_filter_columns[0].selectbox("Environmental condition", ["All", *sorted({
-    row[1] for row in connection.execute(
-        render_sql("dashboard/environmental_ticker.sql", environmental_conditions_path=conditions_path),
-        [selected_date, selected_city, selected_city],
-    ).fetchall()
-    if row[1]
-})])
-severity = table_filter_columns[1].selectbox("Severity", ["All", "critical", "high", "medium", "low"])
-contact_mode = table_filter_columns[2].selectbox("Contact mode", ["All", "app", "sms", "call"])
-member_condition = table_filter_columns[3].selectbox(
-    "Existing condition", ["All", "cardiovascular", "diabetes", "renal", "respiratory"]
-)
-minimum_priority = table_filter_columns[4].number_input(
-    "Minimum priority", min_value=1, max_value=7, value=1
-)
-contactability = table_filter_columns[5].selectbox(
-    "Contactability", ["All", "Contactable", "Not contactable"]
-)
-selected_condition = None if condition == "All" else condition
+table_filters = st.columns(2)
+city = table_filters[0].selectbox("City", ["All", *[city.city_id for city in load_cities()]])
+severity = table_filters[1].selectbox("Severity", ["All", "critical", "high", "medium", "low"])
+selected_city = None if city == "All" else city
 selected_severity = None if severity == "All" else severity
-selected_contact_mode = None if contact_mode == "All" else contact_mode
-selected_member_condition = None if member_condition == "All" else member_condition
-selected_contactability = (
-    None if contactability == "All" else contactability == "Contactable"
-)
 member_table = connection.execute(
     render_sql("dashboard/member_risk_exposure.sql", member_risk_exposure_path=member_risk_path),
-    [
-        selected_date, selected_date,
-        selected_city, selected_city,
-        selected_condition, selected_condition,
-        selected_severity, selected_severity,
-        selected_contact_mode, selected_contact_mode,
-        selected_member_condition, selected_member_condition,
-        minimum_priority, minimum_priority,
-        selected_contactability, selected_contactability,
-    ],
+    [selected_date, selected_date, selected_city, selected_city, selected_severity, selected_severity],
 ).fetch_arrow_table()
 st.dataframe(
     member_table,
     width="stretch",
     column_config={
         "priority_score": st.column_config.NumberColumn(
-            "Contact priority", help="Combines environmental severity, condition relevance, and age band."
+            "Contact Priority", help="Combines environmental severity, condition relevance, and age band."
         ),
         "outreach_eligible": st.column_config.CheckboxColumn(
             "Contactable", help="Whether outreach consent and cooldown requirements are satisfied."
@@ -205,32 +195,76 @@ st.dataframe(
     },
 )
 
-st.subheader("Insights")
-chart_columns = st.columns(3)
-city_comparison = connection.execute(
-    render_sql("dashboard/city_comparison.sql", care_workload_path=workload_path), [selected_date]
+st.subheader("Care Operations Insights")
+outreach_readiness = connection.execute(
+    render_sql("dashboard/outreach_readiness_by_city.sql", care_workload_path=workload_path),
+    [selected_date],
 ).fetch_arrow_table()
-chart_columns[0].caption("City comparison")
-chart_columns[0].bar_chart(
-    city_comparison, x="city_id", y=["at_risk_members", "contactable_members"], stack=False
-)
-severity_summary = connection.execute(
-    render_sql("dashboard/severity_summary.sql", member_risk_exposure_path=member_risk_path),
-    [selected_date, selected_city, selected_city],
+risk_drivers = connection.execute(
+    render_sql("dashboard/risk_driver_impact.sql", member_risk_exposure_path=member_risk_path),
+    [selected_date],
 ).fetch_arrow_table()
-chart_columns[1].caption("Severity summary")
-chart_columns[1].bar_chart(severity_summary, x="severity", y="at_risk_members")
-contact_summary = connection.execute(
-    render_sql("dashboard/contact_mode_summary.sql", member_risk_exposure_path=member_risk_path),
-    [selected_date, selected_city, selected_city],
+condition_workload = connection.execute(
+    render_sql("dashboard/condition_workload.sql", member_risk_exposure_path=member_risk_path),
+    [selected_date],
 ).fetch_arrow_table()
-chart_columns[2].caption("Contactable workload by mode")
-chart_columns[2].bar_chart(contact_summary, x="contact_mode", y="contactable_members")
+channel_workload = connection.execute(
+    render_sql("dashboard/contact_channel_workload.sql", member_risk_exposure_path=member_risk_path),
+    [selected_date],
+).fetch_arrow_table()
 
-st.caption("At-risk member trend from the latest successful snapshot available for each date.")
+readiness_rows = outreach_readiness.to_pylist()
+driver_rows = risk_drivers.to_pylist()
+highest_burden = readiness_rows[0] if readiness_rows else None
+largest_gap = max(readiness_rows, key=lambda row: row["outreach_gap"]) if readiness_rows else None
+dominant_driver = driver_rows[0] if driver_rows else None
+insight_columns = st.columns(3)
+insight_columns[0].metric(
+    "Highest-Burden City",
+    display_text(highest_burden["city_id"]) if highest_burden else "None",
+    f"{highest_burden['at_risk_members']:,} at-risk members" if highest_burden else None,
+    help="City with the largest number of potentially at-risk members.",
+)
+insight_columns[1].metric(
+    "Largest Outreach Gap",
+    display_text(largest_gap["city_id"]) if largest_gap else "None",
+    f"{largest_gap['outreach_gap']:,} members not currently contactable" if largest_gap else None,
+    help="City where the most at-risk members cannot currently be contacted due to consent or cooldown.",
+)
+insight_columns[2].metric(
+    "Dominant Risk Driver",
+    dominant_driver["environmental_condition"] if dominant_driver else "None",
+    f"{dominant_driver['at_risk_members']:,} members affected" if dominant_driver else None,
+    help="Environmental condition affecting the largest number of distinct members.",
+)
+
+chart_columns = st.columns(2)
+chart_columns[0].caption("Outreach Readiness By City")
+chart_columns[0].bar_chart(
+    outreach_readiness, x="city_id", y=["contactable_members", "outreach_gap"], stack=True
+)
+chart_columns[1].caption("Member Impact By Environmental Risk Driver")
+chart_columns[1].bar_chart(risk_drivers, x="environmental_condition", y="at_risk_members")
+chart_columns = st.columns(2)
+chart_columns[0].caption("Vulnerable Cohort Workload")
+chart_columns[0].bar_chart(
+    condition_workload,
+    x="member_condition",
+    y=["contactable_members", "high_priority_members"],
+    stack=False,
+)
+chart_columns[1].caption("Recommended Contact-Channel Demand")
+chart_columns[1].bar_chart(
+    channel_workload,
+    x="contact_channel",
+    y=["contactable_members", "high_priority_members"],
+    stack=False,
+)
+
+st.caption("Daily at-risk and contactable-member demand across the retained forecast horizon.")
 trend = connection.execute(
     render_sql("dashboard/risk_trend.sql", care_workload_history_path=CARE_WORKLOAD_HISTORY),
-    [selected_city, selected_city],
+    [None, None],
 ).fetch_arrow_table()
 st.line_chart(trend, x="decision_date", y=["at_risk_members", "contactable_members"])
 

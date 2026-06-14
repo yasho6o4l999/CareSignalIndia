@@ -26,6 +26,17 @@ subset containing only eligible exposure rows.
 - **High-priority members:** at-risk members with a priority score of four or higher.
 - **Affected cities:** cities with at least one potentially at-risk member.
 
+## Care Operations Insights
+
+The dashboard converts the daily facts into operational questions:
+
+- **Highest-burden city:** where the largest potentially at-risk cohort requires review.
+- **Largest outreach gap:** where consent or cooldown prevents contact with the most at-risk members.
+- **Dominant risk driver:** which environmental condition affects the largest distinct-member cohort.
+- **Outreach readiness by city:** contactable workload compared with the current outreach gap.
+- **Vulnerable cohort workload:** contactable and high-priority demand by chronic condition.
+- **Recommended contact-channel demand:** expected workload by members' preferred outreach channel.
+
 ## Historical Serving
 
 After a successful run passes quality gates, the pipeline publishes the four lightweight daily facts under

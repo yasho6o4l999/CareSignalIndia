@@ -24,11 +24,6 @@ FROM read_parquet('{member_risk_exposure_path}') e
 INNER JOIN city_impact c USING (city_id)
 WHERE e.decision_date = ?
   AND (? IS NULL OR e.city_id = ?)
-  AND (? IS NULL OR e.signal_name = ?)
   AND (? IS NULL OR e.severity = ?)
-  AND (? IS NULL OR e.preferred_channel = ?)
-  AND (? IS NULL OR list_contains(e.matched_conditions, ?))
-  AND (? IS NULL OR e.priority_score >= ?)
-  AND (? IS NULL OR e.outreach_eligible = ?)
 ORDER BY e.priority_score DESC, c.city_at_risk_members DESC, e.city_id, e.member_id
 LIMIT 2000;
