@@ -25,6 +25,7 @@ from src.config import (
     load_runtime_settings,
 )
 from src.incremental import ChangeMetrics, merge_forecast_snapshot
+from src.history import apply_history_retention, publish_history_snapshot
 from src.metadata import MetadataStore
 from src.pipeline.marts import build_marts
 from src.quality import run_cross_mart_quality_checks, run_staging_quality_checks
@@ -355,6 +356,10 @@ def verify_publication(staging: Path) -> None:
         "historical_baselines.parquet",
         "city_conditions.parquet",
         "active_triggers.parquet",
+        "environmental_conditions_daily.parquet",
+        "environmental_metrics_daily.parquet",
+        "member_risk_exposure_daily.parquet",
+        "care_workload_daily.parquet",
         "outreach_queue.parquet",
         "stakeholder_alerts.parquet",
         "publication_cities.parquet",
@@ -456,6 +461,7 @@ async def main() -> None:
         if any(result.status == "fail" for result in quality_results):
             raise RuntimeError("Fatal staging or cross-mart quality failure")
         counts["published"] = publish_run(run_id, staging, metadata)
+        publish_history_snapshot(ROOT, run_id, ROOT / f"data/processed/run_id={run_id}")
         watermarks = [
             (
                 source,
@@ -470,6 +476,7 @@ async def main() -> None:
         metadata.finalize_run(run_id, readiness.status, counts, watermarks, run_message)
         cleanup_raw_staging(ROOT / "data/raw", run_id)
         apply_retention()
+        apply_history_retention(ROOT, load_runtime_settings().analytical_history_retention_days)
         removed_snapshots = apply_member_snapshot_retention(
             ROOT / "data/reference/member_snapshots",
             metadata.protected_member_snapshot_ids(),

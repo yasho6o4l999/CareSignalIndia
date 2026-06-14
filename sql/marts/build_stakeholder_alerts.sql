@@ -1,5 +1,6 @@
 COPY (
     SELECT
+        decision_date,
         ruleset_version,
         rule_id,
         signal_name,

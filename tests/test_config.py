@@ -26,6 +26,7 @@ def test_configuration_is_valid() -> None:
     assert load_outreach_policy().cooldown_hours == 24
     assert load_quality_policy().cross_mart.maximum_consent_leakage == 0
     assert load_runtime_settings().decision_timezone == "Asia/Kolkata"
+    assert load_runtime_settings().analytical_history_retention_days == 90
     assert configuration_version() == configuration_version()
 
 

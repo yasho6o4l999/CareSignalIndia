@@ -21,6 +21,8 @@ heat, coastal high-wind disruption, winter cold-plus-pollution exposure, and Jai
 - Config-driven source checks, cross-source reconciliation, cross-mart integrity, and historical anomalies
 - Configuration-driven regional rules with consecutive-hour persistence windows
 - Decision-timezone-aware separation of today's actions and upcoming forecast risks
+- Date-grained environmental, member-risk, and care-workload facts with 90-day analytical history
+- Dynamic dashboard KPIs, relevant environmental metrics, member filters, comparisons, and trends
 - Governed signal catalog, condition-relevance profiles, dynamic severity bands, and outreach cooldown
 - Environment overrides and deterministic configuration lineage stored with every pipeline run
 
@@ -62,6 +64,10 @@ Raw datasets are partitioned by `source` and `run_id`. DuckDB builds:
 - `city_conditions.parquet`
 - `historical_baselines.parquet`
 - `active_triggers.parquet`
+- `environmental_conditions_daily.parquet`
+- `environmental_metrics_daily.parquet`
+- `member_risk_exposure_daily.parquet`
+- `care_workload_daily.parquet`
 - `outreach_queue.parquet`
 - `stakeholder_alerts.parquet`
 - `quality_results.parquet`
@@ -155,6 +161,8 @@ registered in SQLite, and every pipeline run records the exact `member_snapshot_
 Retention protects every snapshot referenced by a published run and removes only older unreferenced versions.
 Compiled regional rules are cached by deterministic ruleset hash under `data/reference/regional_rules/`.
 Forecast-driven marts remain immutable per-run snapshots.
+Lightweight daily analytical facts are also retained under `data/analytical_history/` for 90 days by default.
+Selecting a dashboard date reads the latest successful snapshot containing that date and never calls source APIs.
 
 Marts are built under a staging directory. Source quality checks, forecast join reconciliation, and cross-mart
 integrity checks must pass before the directory is atomically published. Historical quality profiles establish
@@ -196,6 +204,7 @@ The required reviewer workflow is manual. `deployment/crontab.example` demonstra
 
 - Open-Meteo provides modeled air-quality forecasts rather than ground-station observations.
 - No messages are sent; the project only generates stakeholder and outreach queues.
+- Historical dashboard dates represent the latest retained forecast snapshot containing that date, not observed outcomes.
 - Severity-escalation repeat outreach is configured but requires production action-history data before it can be enforced.
 - The synthetic source emits full extracts; production ingestion should consume source-native incremental member changes.
 - The scheduler example is not installed automatically.

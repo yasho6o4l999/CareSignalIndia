@@ -158,6 +158,9 @@ class CrossMartQualityPolicy(BaseModel):
     maximum_orphan_outreach_triggers: int = Field(ge=0)
     maximum_stakeholder_reconciliation_errors: int = Field(ge=0)
     maximum_unapproved_city_records: int = Field(ge=0)
+    maximum_outreach_not_in_risk_exposure: int = Field(ge=0)
+    maximum_workload_reconciliation_errors: int = Field(ge=0)
+    maximum_at_risk_above_total: int = Field(ge=0)
 
 
 class QualityPolicy(BaseModel):
@@ -184,6 +187,7 @@ class SyntheticMemberPolicy(BaseModel):
 class RuntimeSettings(BaseModel):
     decision_timezone: str
     enabled_cities: list[str] | None = None
+    analytical_history_retention_days: int = Field(default=90, ge=7, le=730)
     synthetic_members: SyntheticMemberPolicy
 
     @field_validator("decision_timezone")

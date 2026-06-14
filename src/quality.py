@@ -236,6 +236,8 @@ def run_cross_mart_quality_checks(
             active_triggers_path=staging / "active_triggers.parquet",
             stakeholder_alerts_path=staging / "stakeholder_alerts.parquet",
             publication_cities_path=staging / "publication_cities.parquet",
+            member_risk_exposure_path=staging / "member_risk_exposure_daily.parquet",
+            care_workload_path=staging / "care_workload_daily.parquet",
         )
     ).fetchone()
     connection.close()
@@ -246,6 +248,9 @@ def run_cross_mart_quality_checks(
         "orphan_outreach_triggers",
         "stakeholder_reconciliation_errors",
         "unapproved_city_records",
+        "outreach_not_in_risk_exposure",
+        "workload_reconciliation_errors",
+        "at_risk_above_total",
     ]
     checks = [
         QualityResult(

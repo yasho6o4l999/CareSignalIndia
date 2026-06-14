@@ -12,6 +12,7 @@ data/processed/*
 data/quarantine/*
 data/metadata/*
 data/reference/*
+data/analytical_history/*
 !data/raw/.gitkeep
 !data/processed/.gitkeep
 !data/quarantine/.gitkeep

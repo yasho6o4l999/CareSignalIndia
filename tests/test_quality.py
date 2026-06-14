@@ -57,22 +57,32 @@ def test_cross_source_reconciliation_identifies_each_join_loss_side(tmp_path) ->
 
 
 def test_cross_mart_quality_reconciles_published_products(tmp_path) -> None:
+    decision_date = datetime(2026, 6, 14, tzinfo=timezone.utc).date()
     trigger = {
         "ruleset_version": "rules-1", "rule_id": "heat", "city_id": "delhi",
         "window_start": datetime(2026, 6, 14, tzinfo=timezone.utc),
         "observed_persistence_hours": 3, "persistence_hours": 3,
     }
     outreach = {
-        **trigger, "member_id": "M-1", "outreach_consent": True, "priority_score": 5,
+        **trigger, "decision_date": decision_date,
+        "member_id": "M-1", "outreach_consent": True, "priority_score": 5,
     }
     alert = {
         "ruleset_version": "rules-1", "rule_id": "heat", "city_id": "delhi",
-        "window_start": trigger["window_start"], "eligible_members": 1, "high_priority_members": 1,
+        "decision_date": decision_date, "window_start": trigger["window_start"],
+        "eligible_members": 1, "high_priority_members": 1,
     }
     write_rows(tmp_path / "publication_cities.parquet", [{"city_id": "delhi"}])
     write_rows(tmp_path / "active_triggers.parquet", [trigger])
     write_rows(tmp_path / "outreach_queue.parquet", [outreach])
     write_rows(tmp_path / "stakeholder_alerts.parquet", [alert])
+    write_rows(tmp_path / "member_risk_exposure_daily.parquet", [{
+        **outreach, "outreach_eligible": True,
+    }])
+    write_rows(tmp_path / "care_workload_daily.parquet", [{
+        "decision_date": decision_date, "city_id": "delhi", "total_members": 1,
+        "at_risk_members": 1, "contactable_members": 1, "high_priority_members": 1,
+    }])
 
     checks, profiles = run_cross_mart_quality_checks("run-1", tmp_path)
 
@@ -84,11 +94,15 @@ def test_cross_mart_quality_reconciles_published_products(tmp_path) -> None:
         "orphan_outreach_triggers",
         "stakeholder_reconciliation_errors",
         "unapproved_city_records",
+        "outreach_not_in_risk_exposure",
+        "workload_reconciliation_errors",
+        "at_risk_above_total",
     }
 
 
 def test_cross_mart_quality_blocks_consent_leakage(tmp_path) -> None:
     window_start = datetime(2026, 6, 14, tzinfo=timezone.utc)
+    decision_date = window_start.date()
     trigger = {
         "ruleset_version": "rules-1", "rule_id": "heat", "city_id": "delhi",
         "window_start": window_start, "observed_persistence_hours": 3, "persistence_hours": 3,
@@ -96,11 +110,21 @@ def test_cross_mart_quality_blocks_consent_leakage(tmp_path) -> None:
     write_rows(tmp_path / "publication_cities.parquet", [{"city_id": "delhi"}])
     write_rows(tmp_path / "active_triggers.parquet", [trigger])
     write_rows(tmp_path / "outreach_queue.parquet", [{
-        **trigger, "member_id": "M-1", "outreach_consent": False, "priority_score": 5,
+        **trigger, "decision_date": decision_date,
+        "member_id": "M-1", "outreach_consent": False, "priority_score": 5,
     }])
     write_rows(tmp_path / "stakeholder_alerts.parquet", [{
         "ruleset_version": "rules-1", "rule_id": "heat", "city_id": "delhi",
-        "window_start": window_start, "eligible_members": 1, "high_priority_members": 1,
+        "decision_date": decision_date, "window_start": window_start,
+        "eligible_members": 1, "high_priority_members": 1,
+    }])
+    write_rows(tmp_path / "member_risk_exposure_daily.parquet", [{
+        **trigger, "decision_date": decision_date, "member_id": "M-1",
+        "outreach_consent": False, "outreach_eligible": False, "priority_score": 5,
+    }])
+    write_rows(tmp_path / "care_workload_daily.parquet", [{
+        "decision_date": decision_date, "city_id": "delhi", "total_members": 1,
+        "at_risk_members": 1, "contactable_members": 0, "high_priority_members": 1,
     }])
 
     checks, _ = run_cross_mart_quality_checks("run-1", tmp_path)

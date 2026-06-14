@@ -57,6 +57,10 @@ def build_marts(
     historical_baselines = processed / "historical_baselines.parquet"
     city_conditions = processed / "city_conditions.parquet"
     active_triggers = processed / "active_triggers.parquet"
+    environmental_conditions_daily = processed / "environmental_conditions_daily.parquet"
+    environmental_metrics_daily = processed / "environmental_metrics_daily.parquet"
+    member_risk_exposure_daily = processed / "member_risk_exposure_daily.parquet"
+    care_workload_daily = processed / "care_workload_daily.parquet"
     outreach_queue = processed / "outreach_queue.parquet"
     stakeholder_alerts = processed / "stakeholder_alerts.parquet"
     decision_date = decision_date or date.today()
@@ -93,12 +97,46 @@ def build_marts(
     )
     connection.execute(
         render_sql(
-            "marts/build_outreach_queue.sql",
+            "marts/build_environmental_conditions_daily.sql",
+            active_triggers_path=active_triggers,
+            decision_timezone=decision_timezone,
+            output_path=environmental_conditions_daily,
+        )
+    )
+    connection.execute(
+        render_sql(
+            "marts/build_environmental_metrics_daily.sql",
+            city_conditions_path=city_conditions,
+            historical_baselines_path=historical_baselines,
+            decision_timezone=decision_timezone,
+            output_path=environmental_metrics_daily,
+        )
+    )
+    connection.execute(
+        render_sql(
+            "marts/build_member_risk_exposure_daily.sql",
             members_path=members,
             member_conditions_path=member_conditions,
-            active_triggers_path=active_triggers,
+            environmental_conditions_daily_path=environmental_conditions_daily,
             rule_conditions_path=rule_conditions,
             cooldown_hours=cooldown_hours,
+            output_path=member_risk_exposure_daily,
+        )
+    )
+    connection.execute(
+        render_sql(
+            "marts/build_care_workload_daily.sql",
+            members_path=members,
+            publication_cities_path=publication_cities,
+            environmental_metrics_daily_path=environmental_metrics_daily,
+            member_risk_exposure_daily_path=member_risk_exposure_daily,
+            output_path=care_workload_daily,
+        )
+    )
+    connection.execute(
+        render_sql(
+            "marts/build_outreach_queue.sql",
+            member_risk_exposure_daily_path=member_risk_exposure_daily,
             output_path=outreach_queue,
         )
     )
@@ -109,3 +147,4 @@ def build_marts(
             output_path=stakeholder_alerts,
         )
     )
+    connection.close()

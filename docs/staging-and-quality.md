@@ -12,7 +12,7 @@ while executable profiling and reconciliation logic lives under `sql/quality/`.
 | Historical profile | Expected city, year, and row coverage | Any failure blocks mart construction |
 | Cross-source reconciliation | Weather and air-quality forecast-hour join loss for publication-approved cities | Configured warning is visible; configured failure blocks mart construction |
 | Historical anomaly | Current source row count compared with the average of prior successful-run profiles | Configured warning or failure severity |
-| Cross-mart integrity | Consent leakage, duplicate outreach, invalid persistence, orphan outreach, alert reconciliation, and publication-city scope | Any count above its configured maximum blocks publication |
+| Cross-mart integrity | Consent leakage, duplicate outreach, invalid persistence, orphan outreach, alert and workload reconciliation, risk-exposure lineage, and publication-city scope | Any count above its configured maximum blocks publication |
 
 ## Historical Profiles
 

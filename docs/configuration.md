@@ -14,7 +14,7 @@ runtime inputs.
 | `extraction_policy.yml` | Source-specific concurrency, timeouts, retries, response contracts, and record-acceptance thresholds |
 | `outreach_policy.yml` | Contact cooldown and future severity-escalation behavior |
 | `quality_policy.yml` | Source coverage/freshness, join-loss, anomaly, and cross-mart integrity thresholds |
-| `runtime.yml` | Decision timezone, synthetic-member count, seed, and regional distribution |
+| `runtime.yml` | Decision timezone, analytical-history retention, synthetic-member count, seed, and regional distribution |
 | `environments/*.yml` | Environment-specific overrides |
 
 `python -m src.validate_config` validates governed vocabularies, duplicate dimensions and predicates,

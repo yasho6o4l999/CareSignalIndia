@@ -64,12 +64,15 @@ flowchart TD
     Triggers --> Outreach["Outreach Queue<br/>Consented relevant members"]
     Members --> Outreach
     Outreach --> Alerts["Stakeholder Alerts<br/>Aggregated care workload"]
+    Triggers --> DailyFacts["Daily analytical facts<br/>Conditions, exposure, workload"]
+    Members --> DailyFacts
 
     Baselines --> Published["Atomic Published Run"]
     Conditions --> Published
     Triggers --> Published
     Outreach --> Published
     Alerts --> Published
+    DailyFacts --> Published
     Published --> Dashboard["Streamlit Dashboard"]
 ```
 
@@ -80,6 +83,10 @@ flowchart TD
 | `historical_baselines.parquet` | Defines what is locally unusual for each city and month |
 | `city_conditions.parquet` | Creates one combined environmental view per city and forecast hour |
 | `active_triggers.parquet` | Contains persisted rule breaches classified as today's actions or upcoming risks |
+| `environmental_conditions_daily.parquet` | Expands trigger windows to a date, city, and condition grain |
+| `environmental_metrics_daily.parquet` | Compares selected-date environmental metrics with local history |
+| `member_risk_exposure_daily.parquet` | Identifies potentially at-risk members before consent and cooldown filters |
+| `care_workload_daily.parquet` | Summarizes at-risk, contactable, and high-priority members by date and city |
 | `outreach_queue.parquet` | Identifies consented members relevant to triggers, separated by action timing |
 | `stakeholder_alerts.parquet` | Summarizes today's immediate workload and later planning workload |
 
@@ -120,6 +127,7 @@ flowchart TD
 | Parquet `data/raw/` | Forecast snapshots and historical source data | Columnar, compressed, and queryable directly by DuckDB |
 | Parquet `data/reference/` | Versioned compiled rules and validated member snapshots | Reusable, immutable analytical inputs for DuckDB |
 | Parquet `data/processed/` | Immutable published analytical runs | Dashboard never reads partially built output |
+| Parquet `data/analytical_history/` | Lightweight immutable daily fact snapshots retained independently of processed runs | Historical date selection without API calls |
 | SQLite `data/metadata/pipeline.db` | Normalized runs and metrics, unified source execution/state, artifact lineage, quality evidence, reference operations, and member dimensions | Transactional operational control plane and member system of record |
 | Quarantine in SQLite | Invalid source-city events and payload context | Makes failures visible without storing generated data in Git |
 
