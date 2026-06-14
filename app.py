@@ -87,6 +87,7 @@ st.subheader("Pipeline health")
 recent_runs = metadata.query("queries/recent_runs.sql", (10,))
 source_readiness = metadata.query("queries/latest_source_readiness.sql", (run_id,))
 invalid_counts = metadata.query("queries/latest_invalid_counts.sql", (run_id,))
+validation_issues = metadata.query("queries/latest_validation_issues.sql", (run_id, 100))
 latest_inserted = sum(row["records_inserted"] for row in source_readiness)
 latest_updated = sum(row["records_updated"] for row in source_readiness)
 latest_unchanged = sum(row["records_unchanged"] for row in source_readiness)
@@ -107,6 +108,9 @@ st.dataframe([dict(row) for row in recent_runs], width="stretch")
 st.dataframe([dict(row) for row in source_readiness], width="stretch")
 if invalid_counts:
     st.dataframe([dict(row) for row in invalid_counts], width="stretch")
+if validation_issues:
+    st.caption("Latest field-level validation issues")
+    st.dataframe([dict(row) for row in validation_issues], width="stretch")
 
 st.warning("Synthetic demonstration data only. This product does not provide medical advice or clinical risk scores.")
 metadata.close()

@@ -11,7 +11,7 @@ runtime inputs.
 | `condition_relevance.yml` | Reusable chronic-condition relevance profiles |
 | `publication_policy.yml` | Required sources, freshness limits, minimum coverage, and mandatory cities |
 | `incremental_policy.yml` | Forecast correction lookback |
-| `extraction_policy.yml` | Source-specific concurrency, timeouts, retries, and response contracts |
+| `extraction_policy.yml` | Source-specific concurrency, timeouts, retries, response contracts, and record-acceptance thresholds |
 | `outreach_policy.yml` | Contact cooldown and future severity-escalation behavior |
 | `runtime.yml` | Synthetic-member count, seed, and regional distribution |
 | `environments/*.yml` | Environment-specific overrides |

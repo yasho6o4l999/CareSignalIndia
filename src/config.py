@@ -97,6 +97,8 @@ class ExtractionSourcePolicy(BaseModel):
     maximum_attempts: int = Field(ge=1, le=10)
     minimum_records: int = Field(ge=1)
     expected_interval_hours: int = Field(ge=1, le=24)
+    minimum_valid_record_ratio: float = Field(gt=0, le=1)
+    maximum_invalid_records: int = Field(ge=0)
 
 
 class ExtractionPolicy(BaseModel):

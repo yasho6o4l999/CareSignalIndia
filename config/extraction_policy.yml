@@ -5,15 +5,21 @@ sources:
     maximum_attempts: 4
     minimum_records: 24
     expected_interval_hours: 1
+    minimum_valid_record_ratio: 0.98
+    maximum_invalid_records: 5
   open_meteo_air_quality:
     maximum_concurrency: 4
     timeout_seconds: 30
     maximum_attempts: 4
     minimum_records: 24
     expected_interval_hours: 1
+    minimum_valid_record_ratio: 0.60
+    maximum_invalid_records: 72
   nasa_power_daily:
     maximum_concurrency: 2
     timeout_seconds: 90
     maximum_attempts: 4
     minimum_records: 1700
     expected_interval_hours: 24
+    minimum_valid_record_ratio: 0.95
+    maximum_invalid_records: 100

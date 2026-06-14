@@ -184,3 +184,56 @@ def test_records_extraction_metrics_and_raw_manifest(tmp_path) -> None:
     assert store.connection.execute("SELECT attempts FROM extraction_metrics").fetchone()[0] == 2
     assert store.latest_raw_manifest("open_meteo_weather", "delhi")["content_hash"] == "content"
     store.close()
+
+
+def test_structured_quarantine_persists_field_level_evidence(tmp_path) -> None:
+    store = MetadataStore(tmp_path / "pipeline.db")
+    store.start_run("run-1", "rules-1", "members-1", 2025)
+    store.quarantine(
+        "run-1", "open_meteo_weather", "delhi", ValueError("invalid humidity"),
+        {"observed_at": "2026-01-01", "relative_humidity": 101},
+        field_name="relative_humidity", natural_key="2026-01-01", invalid_value=101,
+    )
+
+    row = store.connection.execute("SELECT * FROM invalid_records").fetchone()
+    assert row["field_name"] == "relative_humidity"
+    assert row["natural_key"] == "2026-01-01"
+    assert row["invalid_value"] == "101"
+    assert row["severity"] == "fatal"
+    store.close()
+
+
+def test_quarantine_issues_preserves_original_error_type(tmp_path) -> None:
+    from src.validation import ValidationIssue
+
+    store = MetadataStore(tmp_path / "pipeline.db")
+    store.start_run("run-1", "rules-1", "members-1", 2025)
+    store.quarantine_issues("run-1", "open_meteo_air_quality", "delhi", [
+        ValidationIssue(
+            natural_key="2026-01-01", field_name="pm2_5",
+            error_type="cross_field_pm25_above_pm10", invalid_value=50,
+            error_message="PM2.5 exceeds PM10", record_payload={"pm2_5": 50, "pm10": 40},
+            severity="warning",
+        )
+    ])
+    row = store.connection.execute("SELECT error_type, severity FROM invalid_records").fetchone()
+    assert tuple(row) == ("cross_field_pm25_above_pm10", "warning")
+    store.close()
+
+
+def test_invalid_summary_counts_records_instead_of_field_issues(tmp_path) -> None:
+    from src.validation import ValidationIssue
+
+    store = MetadataStore(tmp_path / "pipeline.db")
+    store.start_run("run-1", "rules-1", "members-1", 2025)
+    store.quarantine_issues("run-1", "open_meteo_air_quality", "delhi", [
+        ValidationIssue(
+            natural_key="2026-01-01", field_name=field_name, error_type="missing_value",
+            invalid_value=None, error_message="missing", record_payload={field_name: None},
+        )
+        for field_name in ("pm2_5", "pm10")
+    ])
+
+    summary = store.query("queries/latest_invalid_counts.sql", ("run-1",))
+    assert summary[0]["invalid_records"] == 1
+    store.close()

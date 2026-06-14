@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class WeatherRecord(BaseModel):
@@ -55,6 +55,15 @@ class HistoricalWeatherRecord(BaseModel):
         if value.tzinfo is None:
             raise ValueError("timestamp must be timezone-aware")
         return value.astimezone(timezone.utc)
+
+    @model_validator(mode="after")
+    def minimum_not_above_maximum(self) -> "HistoricalWeatherRecord":
+        if self.minimum_temperature_2m > self.temperature_2m:
+            raise ValueError("minimum temperature must not exceed maximum temperature")
+        expected_range = self.temperature_2m - self.minimum_temperature_2m
+        if abs(self.temperature_range - expected_range) > 0.01:
+            raise ValueError("temperature range must equal maximum minus minimum temperature")
+        return self
 
 
 class QualityResult(BaseModel):

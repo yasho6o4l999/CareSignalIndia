@@ -8,6 +8,7 @@ import httpx
 from src.config import City, ExtractionSourcePolicy, load_extraction_policy
 from src.contracts import validate_time_series
 from src.models import HistoricalWeatherRecord
+from src.validation import ValidatedBatch, ValidationIssue, validate_record
 
 
 TRANSIENT_STATUS_CODES = {429, 500, 502, 503, 504}
@@ -78,7 +79,7 @@ class NasaPowerClient:
                     raise
         raise RuntimeError("request attempts exhausted")
 
-    async def fetch_daily_history(self, city: City, start: date, end: date) -> list[HistoricalWeatherRecord]:
+    async def fetch_daily_history(self, city: City, start: date, end: date) -> ValidatedBatch:
         payload = await self._get_json(
             city.city_id,
             {
@@ -98,6 +99,7 @@ class NasaPowerClient:
         precipitation = parameters["PRECTOTCORR"]
         extracted_at = datetime.now(timezone.utc)
         records: list[HistoricalWeatherRecord] = []
+        issues = []
         for date_key, temperature_value in temperature.items():
             precipitation_value = precipitation.get(date_key)
             minimum_temperature_value = minimum_temperature.get(date_key)
@@ -106,20 +108,56 @@ class NasaPowerClient:
                 or minimum_temperature_value in (None, MISSING_VALUE)
                 or precipitation_value in (None, MISSING_VALUE)
             ):
-                continue
-            records.append(
-                HistoricalWeatherRecord(
-                    city_id=city.city_id,
-                    observed_date=datetime.strptime(date_key, "%Y%m%d").replace(tzinfo=timezone.utc),
-                    temperature_2m=temperature_value,
-                    minimum_temperature_2m=minimum_temperature_value,
-                    temperature_range=temperature_value - minimum_temperature_value,
-                    precipitation=precipitation_value,
-                    extracted_at=extracted_at,
+                issues.append(
+                    ValidationIssue(
+                        natural_key=date_key,
+                        field_name="historical_measurements",
+                        error_type="missing_source_value",
+                        invalid_value=MISSING_VALUE,
+                        error_message="NASA POWER missing-value sentinel or null encountered.",
+                        record_payload={
+                            "city_id": city.city_id,
+                            "observed_date": date_key,
+                            "temperature_2m": temperature_value,
+                            "minimum_temperature_2m": minimum_temperature_value,
+                            "precipitation": precipitation_value,
+                        },
+                    )
                 )
+                continue
+            try:
+                observed_date = datetime.strptime(date_key, "%Y%m%d").replace(tzinfo=timezone.utc)
+            except ValueError as error:
+                issues.append(
+                    ValidationIssue(
+                        natural_key=date_key,
+                        field_name="observed_date",
+                        error_type="invalid_date_key",
+                        invalid_value=date_key,
+                        error_message=str(error),
+                        record_payload={"city_id": city.city_id, "observed_date": date_key},
+                    )
+                )
+                continue
+            record, record_issues = validate_record(
+                HistoricalWeatherRecord,
+                {
+                    "city_id": city.city_id,
+                    "observed_date": observed_date,
+                    "temperature_2m": temperature_value,
+                    "minimum_temperature_2m": minimum_temperature_value,
+                    "temperature_range": temperature_value - minimum_temperature_value,
+                    "precipitation": precipitation_value,
+                    "extracted_at": extracted_at,
+                },
+                date_key,
             )
-        validate_time_series(
-            city.city_id, records, self._policy.minimum_records, self._policy.expected_interval_hours,
-            allow_gaps=True,
-        )
-        return records
+            issues.extend(record_issues)
+            if record:
+                records.append(record)
+        if records:
+            validate_time_series(
+                city.city_id, records, 1, self._policy.expected_interval_hours,
+                allow_gaps=True,
+            )
+        return ValidatedBatch(records=records, issues=issues, received_records=len(temperature))

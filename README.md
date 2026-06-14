@@ -12,6 +12,7 @@ heat, coastal high-wind disruption, winter cold-plus-pollution exposure, and Jai
 - Bounded asynchronous API extraction with connection pooling, timeouts, and retries
 - Source-specific concurrency, timeout, retry, and response-contract policies
 - Pydantic schema and accepted-range validation
+- Per-record salvage with structured field-level quarantine and configurable valid-ratio gates
 - Partitioned, ZSTD-compressed Parquet storage
 - DuckDB transformations directly over Parquet
 - Predicate pushdown in dashboard queries
@@ -186,6 +187,6 @@ The required reviewer workflow is manual. `deployment/crontab.example` demonstra
 
 ## Next Improvements
 
-- Add quarantined-record outputs and partial-source publication
-- Add extraction manifests and incremental retention policies
-- Add mocked API integration tests and query-plan benchmarks
+- Add source-specific anomaly detection informed by historical validation patterns
+- Add alert routing for repeated source degradation and quarantine-volume spikes
+- Add query-plan benchmarks

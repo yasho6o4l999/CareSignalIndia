@@ -18,6 +18,25 @@ The clients:
 SQLite `extraction_metrics` records request duration, attempts, HTTP status, response bytes, and final HTTP
 status per source and city.
 
+## Source Record Validation
+
+Each API response is parsed record by record. Valid records continue through the pipeline while invalid
+records are excluded and written to SQLite with their source, city, natural key, field name, original
+validation error type, invalid value, payload, severity, and validation-policy version.
+
+`config/extraction_policy.yml` controls the minimum valid-record ratio and maximum invalid-record count per
+source. A source-city batch publishes only when it satisfies those thresholds and its minimum valid-record
+coverage. This prevents one malformed value from discarding an otherwise useful city response while still
+blocking materially degraded datasets.
+
+The air-quality policy permits a bounded number of missing future hours because the API can return a
+seven-day timestamp grid with a shorter populated pollution horizon. Those unavailable future values remain
+quarantined and visible; the policy does not silently convert them into valid measurements.
+
+Cross-field checks currently enforce historical minimum temperature and calculated temperature range.
+PM2.5 above PM10 is retained as a warning because modeled environmental data can contain unusual values that
+should be reviewed rather than automatically discarded.
+
 ## Raw Publication
 
 Forecast records are merged under `data/raw/.staging/` before atomic publication to the run directory. Each

@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 import pytest
 from pydantic import ValidationError
 
-from src.models import AirQualityRecord, WeatherRecord
+from src.models import AirQualityRecord, HistoricalWeatherRecord, WeatherRecord
 
 
 def test_weather_rejects_invalid_humidity() -> None:
@@ -27,5 +27,18 @@ def test_air_quality_rejects_negative_pollution() -> None:
             observed_at=datetime.now(timezone.utc),
             pm2_5=-1,
             pm10=10,
+            extracted_at=datetime.now(timezone.utc),
+        )
+
+
+def test_historical_weather_rejects_invalid_cross_field_values() -> None:
+    with pytest.raises(ValidationError, match="minimum temperature"):
+        HistoricalWeatherRecord(
+            city_id="delhi",
+            observed_date=datetime.now(timezone.utc),
+            temperature_2m=20,
+            minimum_temperature_2m=25,
+            temperature_range=5,
+            precipitation=0,
             extracted_at=datetime.now(timezone.utc),
         )

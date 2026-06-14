@@ -16,6 +16,7 @@ from src.config import (
     configuration_version,
     load_cities,
     load_incremental_policy,
+    load_extraction_policy,
     load_outreach_policy,
     load_publication_policy,
     load_rules,
@@ -38,6 +39,7 @@ from src.rules import compile_rules
 from src.storage import write_models, write_rows
 from src.synthetic import generate_members, member_reference_version
 from src.sql import render_sql
+from src.validation import ValidatedBatch
 
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -94,6 +96,31 @@ def latest_timestamp(records: list) -> str | None:
     ]
     values = [value for value in values if value is not None]
     return max(values).isoformat() if values else None
+
+
+def accepted_records(
+    run_id: str,
+    source: str,
+    city_id: str,
+    result: list | ValidatedBatch,
+    metadata: MetadataStore,
+) -> tuple[list, int, int]:
+    if not isinstance(result, ValidatedBatch):
+        return result, len(result), 0
+    metadata.quarantine_issues(run_id, source, city_id, result.issues)
+    policy = load_extraction_policy().sources[source]
+    if (
+        len(result.records) < policy.minimum_records
+        or
+        result.valid_ratio < policy.minimum_valid_record_ratio
+        or result.invalid_records > policy.maximum_invalid_records
+    ):
+        raise ValueError(
+            f"Record validation policy failed: valid_records={len(result.records)}, "
+            f"valid_ratio={result.valid_ratio:.3f}, "
+            f"invalid_records={result.invalid_records}"
+        )
+    return result.records, result.received_records, result.invalid_records
 
 
 def ensure_references(
@@ -189,6 +216,15 @@ async def extract_forecasts(run_id: str, metadata: MetadataStore) -> ExtractionR
                 extraction.failures += 1
                 extraction.rejected += 1
                 continue
+            try:
+                result, received_records, validation_rejections = accepted_records(
+                    run_id, source, city.city_id, result, metadata
+                )
+            except Exception as error:
+                record_source_failure(metadata, run_id, source, city.city_id, error)
+                extraction.failures += 1
+                extraction.rejected += 1
+                continue
             output_path = ROOT / f"data/raw/source={source}/run_id={run_id}/{city.city_id}.parquet"
             previous_run = metadata.watermark(source, city.city_id, "latest_successful_run")
             previous_path = (
@@ -212,14 +248,18 @@ async def extract_forecasts(run_id: str, metadata: MetadataStore) -> ExtractionR
                 run_id,
                 source,
                 city.city_id,
-                len(result),
+                received_records,
                 latest,
                 metrics.inserted,
                 metrics.updated,
                 metrics.unchanged,
-                metrics.rejected,
+                metrics.rejected + validation_rejections,
             )
-            extraction.record_success(source, city.city_id, len(result), metrics, latest)
+            metrics = ChangeMetrics(
+                metrics.inserted, metrics.updated, metrics.unchanged,
+                metrics.rejected + validation_rejections,
+            )
+            extraction.record_success(source, city.city_id, received_records, metrics, latest)
     return extraction
 
 
@@ -248,6 +288,15 @@ async def ensure_history(run_id: str, metadata: MetadataStore, baseline_end_year
             extraction.failures += 1
             extraction.rejected += 1
             continue
+        try:
+            result, received_records, validation_rejections = accepted_records(
+                run_id, "nasa_power_daily", city.city_id, result, metadata
+            )
+        except Exception as error:
+            record_source_failure(metadata, run_id, "nasa_power_daily", city.city_id, error)
+            extraction.failures += 1
+            extraction.rejected += 1
+            continue
         by_year: dict[int, list] = {}
         for record in result:
             by_year.setdefault(record.observed_date.year, []).append(record)
@@ -258,15 +307,16 @@ async def ensure_history(run_id: str, metadata: MetadataStore, baseline_end_year
             run_id,
             "nasa_power_daily",
             city.city_id,
-            len(result),
+            received_records,
             latest,
             inserted=len(result),
+            rejected=validation_rejections,
         )
         extraction.record_success(
             "nasa_power_daily",
             city.city_id,
             0,
-            ChangeMetrics(inserted=len(result), updated=0, unchanged=0),
+            ChangeMetrics(inserted=len(result), updated=0, unchanged=0, rejected=validation_rejections),
             latest,
         )
     return extraction

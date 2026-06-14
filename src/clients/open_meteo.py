@@ -8,6 +8,13 @@ import httpx
 from src.config import City, ExtractionSourcePolicy, load_extraction_policy
 from src.contracts import validate_parallel_arrays, validate_time_series
 from src.models import AirQualityRecord, WeatherRecord
+from src.validation import (
+    ValidatedBatch,
+    ValidationIssue,
+    cross_field_warnings,
+    source_utc_timestamp,
+    validate_record,
+)
 
 
 TRANSIENT_STATUS_CODES = {429, 500, 502, 503, 504}
@@ -100,7 +107,7 @@ class OpenMeteoClient:
                     raise
         raise RuntimeError("request attempts exhausted")
 
-    async def fetch_weather(self, city: City) -> list[WeatherRecord]:
+    async def fetch_weather(self, city: City) -> ValidatedBatch:
         payload = await self._get_json(
             "open_meteo_weather",
             city.city_id,
@@ -119,24 +126,32 @@ class OpenMeteoClient:
             ["time", "apparent_temperature", "temperature_2m", "precipitation", "relative_humidity_2m", "wind_speed_10m"],
         )
         extracted_at = datetime.now(timezone.utc)
-        records = [
-            WeatherRecord(
-                city_id=city.city_id,
-                observed_at=datetime.fromisoformat(timestamp).replace(tzinfo=timezone.utc),
-                apparent_temperature=hourly["apparent_temperature"][index],
-                temperature_2m=hourly["temperature_2m"][index],
-                precipitation=hourly["precipitation"][index],
-                relative_humidity=hourly["relative_humidity_2m"][index],
-                wind_speed=hourly["wind_speed_10m"][index],
-                extracted_at=extracted_at,
-            )
-            for index, timestamp in enumerate(hourly["time"])
-        ]
+        records: list[WeatherRecord] = []
+        issues = []
+        for index, timestamp in enumerate(hourly["time"]):
+            record_payload = {
+                "city_id": city.city_id,
+                "observed_at": source_utc_timestamp(timestamp),
+                "apparent_temperature": hourly["apparent_temperature"][index],
+                "temperature_2m": hourly["temperature_2m"][index],
+                "precipitation": hourly["precipitation"][index],
+                "relative_humidity": hourly["relative_humidity_2m"][index],
+                "wind_speed": hourly["wind_speed_10m"][index],
+                "extracted_at": extracted_at,
+            }
+            record, record_issues = validate_record(WeatherRecord, record_payload, timestamp)
+            issues.extend(record_issues)
+            if record:
+                records.append(record)
         policy = self._policies["open_meteo_weather"]
-        validate_time_series(city.city_id, records, policy.minimum_records, policy.expected_interval_hours)
-        return records
+        if records:
+            validate_time_series(
+                city.city_id, records, 1, policy.expected_interval_hours,
+                allow_gaps=True,
+            )
+        return ValidatedBatch(records=records, issues=issues, received_records=len(hourly["time"]))
 
-    async def fetch_air_quality(self, city: City) -> list[AirQualityRecord]:
+    async def fetch_air_quality(self, city: City) -> ValidatedBatch:
         payload = await self._get_json(
             "open_meteo_air_quality",
             city.city_id,
@@ -153,25 +168,35 @@ class OpenMeteoClient:
         validate_parallel_arrays(hourly, ["time", "pm2_5", "pm10"])
         extracted_at = datetime.now(timezone.utc)
         records: list[AirQualityRecord] = []
+        issues = []
         for index, timestamp in enumerate(hourly["time"]):
             pm2_5 = hourly["pm2_5"][index]
             pm10 = hourly["pm10"][index]
             if pm2_5 is None or pm10 is None:
+                issues.extend(
+                    ValidationIssue(
+                        natural_key=timestamp, field_name=field_name, error_type="missing_value",
+                        invalid_value=None, error_message="Required pollution value is missing.",
+                        record_payload={"city_id": city.city_id, "observed_at": timestamp, "pm2_5": pm2_5, "pm10": pm10},
+                    )
+                    for field_name, value in (("pm2_5", pm2_5), ("pm10", pm10))
+                    if value is None
+                )
                 continue
-            records.append(
-                AirQualityRecord(
-                city_id=city.city_id,
-                observed_at=datetime.fromisoformat(timestamp).replace(tzinfo=timezone.utc),
-                pm2_5=pm2_5,
-                pm10=pm10,
-                extracted_at=extracted_at,
-            )
-            )
-        if len(records) < self._policies["open_meteo_air_quality"].minimum_records:
-            raise ValueError(f"{city.city_id} air-quality response has insufficient valid records")
+            payload = {
+                "city_id": city.city_id,
+                "observed_at": source_utc_timestamp(timestamp),
+                "pm2_5": pm2_5, "pm10": pm10, "extracted_at": extracted_at,
+            }
+            record, record_issues = validate_record(AirQualityRecord, payload, timestamp)
+            issues.extend(record_issues)
+            if record:
+                records.append(record)
+                issues.extend(cross_field_warnings("open_meteo_air_quality", record, payload, timestamp))
         policy = self._policies["open_meteo_air_quality"]
-        validate_time_series(
-            city.city_id, records, policy.minimum_records, policy.expected_interval_hours,
-            allow_gaps=True,
-        )
-        return records
+        if records:
+            validate_time_series(
+                city.city_id, records, 1, policy.expected_interval_hours,
+                allow_gaps=True,
+            )
+        return ValidatedBatch(records=records, issues=issues, received_records=len(hourly["time"]))

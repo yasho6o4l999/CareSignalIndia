@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from src.config import ROOT
+from src.validation import ValidationIssue
 
 
 DATABASE_PATH = ROOT / "data/metadata/pipeline.db"
@@ -344,11 +345,47 @@ class MetadataStore:
                 (run_id, source, city_id, utc_now(), message),
             )
 
-    def quarantine(self, run_id: str, source: str, city_id: str | None, error: Exception, payload: Any) -> None:
+    def quarantine(
+        self,
+        run_id: str,
+        source: str,
+        city_id: str | None,
+        error: Exception,
+        payload: Any,
+        field_name: str | None = None,
+        natural_key: str | None = None,
+        invalid_value: Any = None,
+        severity: str = "fatal",
+    ) -> None:
         with self.connection:
             self.connection.execute(
                 read_sql("mutations/quarantine_record.sql"),
-                (run_id, source, city_id, type(error).__name__, str(error), json.dumps(payload, default=str), utc_now()),
+                (
+                    run_id, source, city_id, type(error).__name__, field_name, str(error),
+                    json.dumps(payload, default=str), utc_now(), natural_key,
+                    json.dumps(invalid_value, default=str), severity, "v1",
+                ),
+            )
+
+    def quarantine_issues(
+        self,
+        run_id: str,
+        source: str,
+        city_id: str,
+        issues: list[ValidationIssue],
+    ) -> None:
+        with self.connection:
+            self.connection.executemany(
+                read_sql("mutations/quarantine_record.sql"),
+                [
+                    (
+                        run_id, source, city_id, issue.error_type, issue.field_name,
+                        issue.error_message, json.dumps(issue.record_payload, default=str), utc_now(),
+                        issue.natural_key, json.dumps(issue.invalid_value, default=str),
+                        issue.severity, "v1",
+                    )
+                    for issue in issues
+                ],
             )
 
     def record_dataset(self, run_id: str, name: str, path: Path, count: int) -> None:
